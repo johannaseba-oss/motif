@@ -184,7 +184,6 @@ button svg { width: 24px; height: 24px; display: block; }
 .vf-shadow { background: var(--ink); transform: translate(8px, 9px); }
 .vf-frame { position: relative; background: #e9e9e9; overflow: hidden; }
 .vf-frame video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
-.vf-frame video.mirror { transform: scaleX(-1); }
 .vf-flash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; }
 .vf-error {
   grid-area: 1 / 1;
@@ -407,3 +406,20 @@ span.cam-side { width: 48px; }
   border-radius: 14px;
 }
 [hidden] { display: none !important; }
+
+/* ---------- Zoom ---------- */
+
+.viewfinder { touch-action: none; }
+.zoom-row { display: flex; justify-content: center; gap: 8px; flex: none; min-height: 40px; padding-top: 14px; box-sizing: content-box; }
+.zoom-row button {
+  min-width: 40px;
+  height: 40px;
+  padding: 0 8px;
+  border-radius: 20px;
+  border: var(--line) solid var(--ink);
+  font-size: 14px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.zoom-row button.on { background: var(--ink); color: var(--paper); }
+.cam-bar { height: 104px; padding-top: 12px; }
