@@ -6,6 +6,7 @@ import * as store from './store.js';
 import { clipPathCss, cutStamp } from './stamp.js';
 import { Album } from './album.js';
 import { openCamera } from './camera.js';
+import { punchOut, pinToAlbum } from './punch.js';
 import { icons } from './icons.js';
 import { tick } from './haptics.js';
 
@@ -60,6 +61,7 @@ function profileForm({ first }) {
   const save = el.querySelector('[data-a=save]');
   const paint = () => {
     pick.innerHTML = draftUrl ? `<img src="${draftUrl}" alt="">` : `<span class="avatar-empty stamp-clip">${icons.person}</span>`;
+    pick.classList.toggle('empty', !draftUrl);
     save.disabled = !input.value.trim();
   };
   paint();
@@ -68,13 +70,11 @@ function profileForm({ first }) {
   pick.addEventListener('click', () => {
     openCamera({
       facing: 'user',
-      leftLabel: 'Abbrechen',
       onShot: async cut => {
         draftAvatar = cut.thumb;
         if (draftUrl) URL.revokeObjectURL(draftUrl);
         draftUrl = URL.createObjectURL(draftAvatar);
         paint();
-        return true;
       },
     });
   });
@@ -121,25 +121,24 @@ function escapeHtml(s) {
 
 /* ---------- Kamera ---------- */
 
-function lastThumbUrl() {
-  const last = store.stamps.reduce((a, b) => (!a || b.createdAt > a.createdAt ? b : a), null);
-  return last ? album.images.get(last.id)?.src || URL.createObjectURL(last.thumb) : null;
-}
-
 function showCamera() {
-  let newest = null;
   openCamera({
-    leftThumb: lastThumbUrl(),
-    onShot: async (cut, screen) => {
-      newest = await store.addStamp(cut);
-      screen.flyTo();
-      album.preload();
-      setTimeout(() => screen.setBack(URL.createObjectURL(newest.thumb)), 380);
-      return false;
-    },
-    onClose: () => {
-      if (newest) album.goToSlot(newest.slot);
-      else album.render();
+    onShot: async (cut, { frame, photo, finish }) => {
+      const stamp = await store.addStamp(cut);
+      // Der Platz bleibt frei, bis die Marke dort ankommt
+      album.hiddenId = stamp.id;
+      album.goToSlot(stamp.slot);
+      const flying = await punchOut(frame, photo, cut.full);
+      const closing = finish();
+      await pinToAlbum(flying, frame, album.cellClientRect(stamp.slot), async () => {
+        await album.images.get(stamp.id)?.decode().catch(() => {});
+        album.hiddenId = null;
+        album.render();
+        album.book.animate(
+          [{ transform: 'none' }, { transform: 'translateY(3px)' }, { transform: 'none' }],
+          { duration: 150, easing: 'ease-out' });
+      });
+      await closing;
     },
   });
 }
@@ -157,7 +156,7 @@ async function openDetail(stamp, from) {
         <b>${fmtDate(stamp.createdAt)}</b>
         <span>Seite ${Math.floor(stamp.slot / store.PER_PAGE) + 1}</span>
       </div>
-      <button class="round" data-a="delete" aria-label="Marke löschen">${icons.trash}</button>
+      <button class="delete-btn" data-a="delete">${icons.trash}<span>Marke löschen</span></button>
     </div>
     <button class="round detail-close" aria-label="Schließen">${icons.close}</button>`;
   app.append(el);
@@ -220,7 +219,7 @@ async function openDetail(stamp, from) {
         if (!del.isConnected) return;
         armed = false;
         del.classList.remove('armed');
-        del.innerHTML = icons.trash;
+        del.innerHTML = `${icons.trash}<span>Marke löschen</span>`;
       }, 3000);
       return;
     }

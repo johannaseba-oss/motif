@@ -15,6 +15,21 @@ function toBlob(canvas) {
   return new Promise(res => canvas.toBlob(res, 'image/png'));
 }
 
+function drawCover(g, source, srcW, srcH, W, H, mirror) {
+  let sw = srcW, sh = srcH;
+  if (srcW / srcH > STAMP_ASPECT) sw = srcH * STAMP_ASPECT; else sh = srcW / STAMP_ASPECT;
+  if (mirror) { g.translate(W, 0); g.scale(-1, 1); }
+  g.drawImage(source, (srcW - sw) / 2, (srcH - sh) / 2, sw, sh, 0, 0, W, H);
+}
+
+// Das ganze Foto im Markenformat, noch ohne ausgestanzte Form
+export function cropPhoto(source, srcW, srcH, mirror = false) {
+  const c = document.createElement('canvas');
+  c.width = FULL_W; c.height = Math.round(FULL_W / STAMP_ASPECT);
+  drawCover(c.getContext('2d'), source, srcW, srcH, c.width, c.height, mirror);
+  return c;
+}
+
 // Schneidet eine Quelle (Video, Bild, Canvas) mittig auf das Markenformat zu.
 // Außerhalb der Form bleibt das gespeicherte PNG durchsichtig.
 export async function cutStamp(source, srcW, srcH, mirror = false) {
@@ -26,11 +41,7 @@ export async function cutStamp(source, srcW, srcH, mirror = false) {
   g.scale(W, H);
   g.clip(stampPath);
   g.setTransform(1, 0, 0, 1, 0, 0);
-  const srcAspect = srcW / srcH;
-  let sw = srcW, sh = srcH;
-  if (srcAspect > STAMP_ASPECT) sw = srcH * STAMP_ASPECT; else sh = srcW / STAMP_ASPECT;
-  if (mirror) { g.translate(W, 0); g.scale(-1, 1); }
-  g.drawImage(source, (srcW - sw) / 2, (srcH - sh) / 2, sw, sh, 0, 0, W, H);
+  drawCover(g, source, srcW, srcH, W, H, mirror);
   g.restore();
 
   const t = document.createElement('canvas');

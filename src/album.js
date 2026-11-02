@@ -147,7 +147,7 @@ export class Album {
         const slot = page * PER_PAGE + cell;
         const s = store.bySlot.get(slot);
         const r = this.cellRect(cell);
-        const lifted = this.drag && s === this.drag.stamp;
+        const lifted = s && (s.id === this.hiddenId || (this.drag && s === this.drag.stamp));
         const isTarget = hl === slot;
         if (s && !lifted) {
           this.drawStamp(g, s, r, isTarget ? 0.35 : 1);

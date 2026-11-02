@@ -157,7 +157,7 @@ button svg { width: 24px; height: 24px; display: block; }
   z-index: 20;
   display: flex;
   flex-direction: column;
-  padding: calc(var(--safe-t) + 20px) calc(var(--safe-r) + 22px) calc(var(--safe-b) + 18px) calc(var(--safe-l) + 22px);
+  padding: calc(var(--safe-t) + 74px) calc(var(--safe-r) + 22px) calc(var(--safe-b) + 18px) calc(var(--safe-l) + 22px);
 }
 .viewfinder { position: relative; flex: 1; min-height: 0; display: grid; place-items: center; container-type: size; }
 .vf-frame, .vf-shadow {
@@ -185,8 +185,9 @@ button svg { width: 24px; height: 24px; display: block; }
 }
 .cam-bar { display: flex; align-items: center; justify-content: space-between; flex: none; height: 112px; padding-top: 18px; }
 .cam-side { flex: none; }
-.cam-back:not(.round) { width: 48px; height: 64px; background: transparent; filter: drop-shadow(2px 3px 0 var(--ink)); }
-.cam-back img { width: 100%; height: 100%; object-fit: contain; display: block; }
+span.cam-side { width: 48px; }
+.cam-close { position: absolute; top: calc(var(--safe-t) + 14px); right: calc(var(--safe-r) + 20px); z-index: 2; }
+.camera.shot .viewfinder, .camera.shot .cam-bar, .camera.shot .cam-close { visibility: hidden; }
 .shutter {
   width: 80px;
   height: 80px;
@@ -199,7 +200,10 @@ button svg { width: 24px; height: 24px; display: block; }
 .shutter span { display: block; width: 100%; height: 100%; border-radius: 50%; background: var(--ink); }
 .shutter:active { transform: translate(4px, 6px); box-shadow: 0 0 0 var(--ink); }
 .shutter:disabled { opacity: .35; }
-.fly { position: absolute; z-index: 3; transform-origin: 50% 50%; pointer-events: none; }
+.punch-sheet, .punch-stamp, .punch-die { position: fixed; pointer-events: none; }
+.punch-sheet { z-index: 60; filter: drop-shadow(6px 7px 0 var(--ink)); }
+.punch-stamp { z-index: 61; filter: drop-shadow(6px 7px 0 var(--ink)); }
+.punch-die { z-index: 62; background: var(--ink); }
 
 /* ---------- Profil ---------- */
 
@@ -223,6 +227,7 @@ button svg { width: 24px; height: 24px; display: block; }
   background: transparent;
   filter: drop-shadow(5px 6px 0 var(--ink));
 }
+.avatar-pick.empty { filter: none; }
 .avatar-pick img { width: 100%; height: 100%; object-fit: contain; display: block; }
 .avatar-pick .avatar-empty svg { width: 44px; height: 44px; }
 .avatar-hint { margin: 16px 0 0; font-size: 14px; color: var(--soft); }
@@ -288,16 +293,24 @@ button svg { width: 24px; height: 24px; display: block; }
 }
 .detail-info b { display: block; font-weight: 500; font-size: 16px; }
 .detail-info span { display: block; margin-top: 3px; font-size: 14px; color: var(--soft); }
-.detail-info .armed {
-  width: auto;
+.delete-btn {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   height: 48px;
-  padding: 0 18px;
+  padding: 0 18px 0 14px;
   border-radius: 24px;
-  background: var(--ink);
-  color: var(--paper);
+  border: var(--line) solid var(--ink);
+  box-shadow: 3px 4px 0 var(--ink);
   font-size: 15px;
   font-weight: 500;
+  transition: transform .08s, box-shadow .08s;
 }
+.delete-btn svg { width: 20px; height: 20px; }
+.delete-btn span { display: inline; margin: 0; font-size: inherit; color: inherit; }
+.delete-btn:active { transform: translate(3px, 4px); box-shadow: 0 0 0 var(--ink); }
+.detail-info .armed { padding: 0 18px; background: var(--ink); color: var(--paper); }
 .detail-close { position: absolute; top: calc(var(--safe-t) + 16px); right: calc(var(--safe-r) + 20px); }
 .detail.leaving { background: transparent; pointer-events: none; }
 .detail.leaving .detail-info, .detail.leaving .detail-close { opacity: 0; }
