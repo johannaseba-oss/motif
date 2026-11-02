@@ -67,11 +67,60 @@ export async function open(accountId) {
   bySlot.clear();
   for (const s of stamps) bySlot.set(s.slot, s);
   pageTitles = (await req(db.transaction('meta').objectStore('meta').get('pageTitles'))) || {};
+  shared = (await req(db.transaction('meta').objectStore('meta').get('sharedPages'))) || {};
 }
 
+/* Gemeinsame Seiten: Albumseite -> Angaben vom Server. Die Serverzugriffe kommen aus sync.js. */
+let shared = {};
+let ops = null;
+let titleOp = null;
+export const setSharedOps = o => { ops = o; };
+export const setSharedTitleOp = f => { titleOp = f; };
+export const sharedPages = () => shared;
+export const sharedPage = page => shared[page] || null;
+export const isShared = page => !!shared[page];
+export function pageOfShared(id) {
+  const hit = Object.entries(shared).find(([, info]) => info.id === id);
+  return hit ? +hit[0] : null;
+}
+export const setSharedPage = (page, info) => { shared[page] = info; };
+export const unsetSharedPage = page => { delete shared[page]; };
+export const saveSharedPages = () => tx('meta', 'readwrite', t => t.objectStore('meta').put(shared, 'sharedPages'));
+
+export function firstFreeSlotOnPage(page) {
+  for (let c = 0; c < PER_PAGE; c++) if (!bySlot.has(page * PER_PAGE + c)) return page * PER_PAGE + c;
+  return null;
+}
+export function firstEmptyPage() {
+  for (let p = 0; ; p++) {
+    if (isShared(p) || pageTitles[p]) continue;
+    if (!stamps.some(s => Math.floor(s.slot / PER_PAGE) === p)) return p;
+  }
+}
+
+// Was beim Ablegen passieren darf: true, 'share' (wird hochgeladen, vorher fragen) oder false
+export function dropRule(s, slot) {
+  const page = Math.floor(slot / PER_PAGE);
+  const other = bySlot.get(slot);
+  if (other === s) return true;
+  if (s.shared) return page === Math.floor(s.slot / PER_PAGE) && !other;
+  if (isShared(page)) return other ? false : 'share';
+  return other?.shared ? false : true;
+}
+
+export const deleteLocalRecord = id => tx(['stamps', 'full'], 'readwrite', t => {
+  t.objectStore('stamps').delete(id);
+  t.objectStore('full').delete(id);
+});
+export const persistLocal = s => tx('stamps', 'readwrite', t => t.objectStore('stamps').put(s));
+
 let pageTitles = {};
-export const getPageTitle = page => pageTitles[page] || '';
+export const getPageTitle = page => (shared[page] ? shared[page].title : pageTitles[page]) || '';
 export function setPageTitle(page, title) {
+  if (shared[page]) return titleOp(page, title);
+  return setPageTitleLocal(page, title);
+}
+export function setPageTitleLocal(page, title) {
   if (title) pageTitles[page] = title; else delete pageTitles[page];
   return tx('meta', 'readwrite', t => t.objectStore('meta').put(pageTitles, 'pageTitles'));
 }
@@ -85,14 +134,14 @@ export function saveProfile(p) {
 
 export function firstFreeSlot() {
   let s = 0;
-  while (bySlot.has(s)) s++;
+  while (bySlot.has(s) || isShared(Math.floor(s / PER_PAGE))) s++;
   return s;
 }
 export function usedPages() {
   let max = -1;
   for (const s of stamps) if (s.slot > max) max = s.slot;
   const stampPages = max < 0 ? 0 : Math.floor(max / PER_PAGE) + 1;
-  return Math.max(stampPages, ...Object.keys(pageTitles).map(p => +p + 1));
+  return Math.max(stampPages, ...[...Object.keys(pageTitles), ...Object.keys(shared)].map(p => +p + 1));
 }
 
 export async function addStamp({ full, thumb, createdAt = Date.now() }) {
@@ -109,6 +158,8 @@ export async function addStamp({ full, thumb, createdAt = Date.now() }) {
 // Legt eine Marke auf einen Platz; ein belegter Platz tauscht.
 export async function moveStamp(s, slot) {
   if (s.slot === slot) return null;
+  if (s.shared) { await ops.move(s, slot); return null; }
+  if (isShared(Math.floor(slot / PER_PAGE))) { await ops.adopt(s, slot); return null; }
   const other = bySlot.get(slot) || null;
   const from = s.slot;
   bySlot.delete(from);
@@ -123,11 +174,13 @@ export async function moveStamp(s, slot) {
 }
 
 export function updateStamp(s, fields) {
+  if (s.shared) return ops.update(s, fields);
   Object.assign(s, fields);
   return tx('stamps', 'readwrite', t => t.objectStore('stamps').put(s));
 }
 
 export async function deleteStamp(s) {
+  if (s.shared) return ops.remove(s);
   await tx(['stamps', 'full'], 'readwrite', t => {
     t.objectStore('stamps').delete(s.id);
     t.objectStore('full').delete(s.id);
@@ -137,5 +190,7 @@ export async function deleteStamp(s) {
 }
 
 export function getFull(id) {
+  const s = stamps.find(x => x.id === id);
+  if (s?.shared && !s.pending) return ops.full(s);
   return req(db.transaction('full').objectStore('full').get(id));
 }

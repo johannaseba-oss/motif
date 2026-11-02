@@ -10,12 +10,18 @@ const EDGE_ZONE = 34;
 const EDGE_DWELL = 550;
 const INK = '#000';
 
+const PEOPLE = new Path2D('M9 11a3.2 3.2 0 1 0 0-6.4A3.2 3.2 0 0 0 9 11zM3.5 19c.5-3.5 2.6-5.3 5.5-5.3s5 1.8 5.5 5.3M16 5.2a3 3 0 0 1 0 5.7M17.3 13.9c1.9.6 3 2.4 3.3 5.1');
+const SHARE_R = 15;
+
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
 export class Album {
-  constructor(stage, { onOpen }) {
+  constructor(stage, { onOpen, onShare, canMove, confirmShareDrop }) {
     this.stage = stage;
     this.onOpen = onOpen;
+    this.onShare = onShare;
+    this.canMove = canMove;
+    this.confirmShareDrop = confirmShareDrop;
     this.cur = 0;           // aktuelle Seite (Doppelseite: immer die linke, also gerade)
     this.spread = false;
     this.pw = this.ph = 0;
@@ -151,8 +157,28 @@ export class Album {
       g.fillStyle = title ? INK : '#c8c8c8';
       g.textAlign = 'left';
       g.textBaseline = 'middle';
-      g.fillText(title || 'Seite benennen', padX, headH * 0.58, pw - 2 * padX);
+      const sharedInfo = store.sharedPage(page);
+      const titleText = title || (sharedInfo ? 'Gemeinsame Seite' : 'Seite benennen');
+      g.fillText(titleText, padX, headH * 0.58, pw - 2 * padX - SHARE_R * 2 - 8);
       g.textBaseline = 'alphabetic';
+
+      // Teilen-Knopf: gefüllt, wenn die Seite gemeinsam ist
+      const cx = pw - padX - SHARE_R, cy = headH * 0.58;
+      g.save();
+      g.beginPath();
+      g.arc(cx, cy, SHARE_R - 1, 0, Math.PI * 2);
+      g.lineWidth = 1.6;
+      g.strokeStyle = INK;
+      g.fillStyle = sharedInfo ? INK : '#fff';
+      g.fill();
+      g.stroke();
+      g.translate(cx - 9, cy - 9);
+      g.scale(0.75, 0.75);
+      g.lineWidth = 2;
+      g.lineCap = 'round';
+      g.strokeStyle = sharedInfo ? '#fff' : INK;
+      g.stroke(PEOPLE);
+      g.restore();
 
       for (let cell = 0; cell < PER_PAGE; cell++) {
         const slot = page * PER_PAGE + cell;
@@ -411,7 +437,7 @@ export class Album {
       id: e.pointerId, x0: e.clientX, y0: e.clientY, t0: e.timeStamp,
       lastX: e.clientX, lastT: e.timeStamp, vx: 0, stamp, mode: 'wait', timer: 0,
     };
-    if (stamp) g.timer = setTimeout(() => this.pick(g), LONG_PRESS);
+    if (stamp && this.canMove(stamp)) g.timer = setTimeout(() => this.pick(g), LONG_PRESS);
   }
 
   move(e) {
@@ -452,17 +478,28 @@ export class Album {
     }
     if (g.mode !== 'wait') return;
     if (g.stamp) { this.onOpen?.(g.stamp, this.cellClientRect(g.stamp.slot)); return; }
-    const titlePage = this.titlePageAt(e.clientX, e.clientY);
-    if (titlePage != null) this.editTitle(titlePage);
+    const head = this.headAt(e.clientX, e.clientY);
+    if (!head) return;
+    if (head.share) { this.onShare?.(head.page); return; }
+    const info = store.sharedPage(head.page);
+    if (!info || this.canEditSharedTitle?.(info)) this.editTitle(head.page);
+  }
+
+  // Die aktuell sichtbare gemeinsame Seite mit freiem Platz, dorthin geht dann eine neue Aufnahme
+  visibleSharedPage() {
+    return this.visiblePages().find(p => p != null && store.isShared(p) && store.firstFreeSlotOnPage(p) != null) ?? null;
   }
 
   /* ---------- Seitentitel ---------- */
 
-  titlePageAt(clientX, clientY) {
+  headAt(clientX, clientY) {
     const b = this.book.getBoundingClientRect();
-    const x = clientX - b.left, y = clientY - b.top;
+    let x = clientX - b.left;
+    const y = clientY - b.top;
     if (x < 0 || x > b.width || y < 0 || y > this.grid.headH) return null;
-    return this.spread && x >= this.pw ? this.cur + 1 : this.cur;
+    const right = this.spread && x >= this.pw;
+    if (right) x -= this.pw;
+    return { page: right ? this.cur + 1 : this.cur, share: x > this.pw - this.grid.padX - SHARE_R * 2 - 12 };
   }
 
   editTitle(page) {
@@ -477,7 +514,7 @@ export class Album {
     Object.assign(input.style, {
       left: offset + padX + 'px',
       top: headH * 0.58 - titleSize * 0.75 + 'px',
-      width: this.pw - 2 * padX + 'px',
+      width: this.pw - 2 * padX - SHARE_R * 2 - 8 + 'px',
       height: titleSize * 1.5 + 'px',
       fontSize: titleSize + 'px',
     });
@@ -567,7 +604,9 @@ export class Album {
     clearInterval(d.timer);
     if (d.flipping) await d.flipping;
     const h = x >= 0 ? this.hit(x, y) : null;
-    const slot = h ? h.slot : d.origin;
+    let slot = h ? h.slot : d.origin;
+    const rule = store.dropRule(d.stamp, slot);
+    if (!rule || (rule === 'share' && !(await this.confirmShareDrop(d.stamp)))) slot = d.origin;
     const other = store.bySlot.get(slot);
     const swap = other && other !== d.stamp ? other : null;
     tick();

@@ -6,6 +6,7 @@ const err = message => ({ data: {}, error: { message } });
 const pub = (email, u) => ({ id: u.id, email, identities: [{}] });
 
 export const devClient = {
+  isDev: true,
   auth: {
     onAuthStateChange() {},
     async getSession() {

@@ -8,6 +8,7 @@ import { Album } from './album.js';
 import { openCamera } from './camera.js';
 import { punchOut, pinToAlbum } from './punch.js';
 import * as auth from './auth.js';
+import * as sync from './sync.js';
 import { icons } from './icons.js';
 import { tick } from './haptics.js';
 
@@ -19,7 +20,18 @@ let album = null;
 let avatarUrl = null;
 
 const fmtDate = t => new Date(t).toLocaleDateString('de-DE', { day: 'numeric', month: 'long', year: 'numeric' });
-const markenText = n => `${n} ${n === 1 ? 'Marke' : 'Marken'}`;
+const PUBLIC_URL = import.meta.env.DEV ? location.origin + location.pathname : 'https://johannaseba-oss.github.io/motif/';
+const PENDING_JOIN = 'motif.pendingJoin';
+
+function toast(text) {
+  document.querySelector('.toast')?.remove();
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.setAttribute('role', 'status');
+  el.textContent = text;
+  document.body.append(el);
+  setTimeout(() => el.remove(), 4500);
+}
 
 function setAvatarUrl() {
   if (avatarUrl) URL.revokeObjectURL(avatarUrl);
@@ -106,12 +118,13 @@ function authForm(startMode = 'login') {
 async function enterApp() {
   app.innerHTML = '';
   await store.open(auth.user.id);
+  await sync.init();
   profile = await store.getProfile();
   setAvatarUrl();
   if (import.meta.env.DEV) {
     const q = new URLSearchParams(location.search);
     if (q.has('seed') && !store.stamps.length) await devSeed(+q.get('seed') || 40);
-    window.__perfo = { store, auth, get album() { return album; } };
+    window.__perfo = { store, auth, sync, get album() { return album; } };
   }
   if (profile) showAlbum();
   else profileForm({ first: true });
@@ -180,6 +193,7 @@ function profileForm({ first }) {
     if (!name) return;
     profile = { name, avatar: draftAvatar, createdAt: profile?.createdAt || Date.now() };
     await store.saveProfile(profile);
+    sync.setDisplayName(name).catch(() => {});
     setAvatarUrl();
     close();
     showAlbum();
@@ -203,7 +217,14 @@ function showAlbum() {
       <button class="pill primary shoot">${icons.camera}<span>Aufnehmen</span></button>
     </footer>`;
   app.prepend(el);
-  album = new Album(el.querySelector('.stage'), { onOpen: openDetail });
+  album = new Album(el.querySelector('.stage'), {
+    onOpen: openDetail,
+    onShare: openShareSheet,
+    canMove: sync.isMine,
+    confirmShareDrop: () => confirmSheet('Marke auf die gemeinsame Seite legen?', 'Das Foto wird dafür hochgeladen und alle auf dieser Seite können es sehen.', 'Hochladen'),
+  });
+  album.canEditSharedTitle = info => info.owner === auth.user.id;
+  startSharing();
   el.querySelector('.profile-btn').addEventListener('click', () => profileForm({ first: false }));
   el.querySelector('.shoot').addEventListener('click', showCamera);
 }
@@ -217,7 +238,15 @@ function escapeHtml(s) {
 function showCamera() {
   openCamera({
     onShot: async (cut, { frame, photo, finish }) => {
-      const stamp = await store.addStamp(cut);
+      // Bei einer offenen gemeinsamen Seite landet das Foto dort, sonst bleibt es privat
+      const sharedTarget = album.visibleSharedPage();
+      const stamp = sharedTarget != null
+        ? sync.addToShared(sharedTarget, cut, () => {
+          toast('Hochladen hat nicht geklappt. Das Foto liegt jetzt privat in deinem Album.');
+          album.preload();
+          album.render();
+        })
+        : await store.addStamp(cut);
       // Der Platz bleibt frei, bis die Marke dort ankommt
       album.hiddenId = stamp.id;
       album.goToSlot(stamp.slot);
@@ -236,6 +265,147 @@ function showCamera() {
   });
 }
 
+/* ---------- Gemeinsame Seiten ---------- */
+
+let sharingStarted = false;
+
+async function syncNow() {
+  if (!album || album.drag || album.flip || album.gesture) return;
+  try {
+    const { changed, removed } = await sync.refresh();
+    removed.forEach(id => album.forget(id));
+    if (changed) { album.clampCur(); album.preload(); album.render(); }
+  } catch { /* offline: beim nächsten Mal */ }
+}
+
+async function startSharing() {
+  if (sharingStarted) return;
+  sharingStarted = true;
+  sync.handlers.failed = () => toast('Hochladen hat nicht geklappt. Die Marke liegt wieder privat in deinem Album.');
+  sync.handlers.changed = () => { album.preload(); album.render(); };
+  await syncNow();
+  setInterval(() => { if (!document.hidden) syncNow(); }, 20000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) syncNow(); });
+
+  const token = localStorage.getItem(PENDING_JOIN);
+  if (!token) return;
+  localStorage.removeItem(PENDING_JOIN);
+  try {
+    const page = await sync.joinByToken(token, profile.name);
+    album.preload();
+    album.goToSlot(page * store.PER_PAGE);
+    toast('Du bist jetzt auf dieser gemeinsamen Seite dabei.');
+  } catch {
+    toast('Dieser Einladungslink funktioniert nicht mehr.');
+  }
+}
+
+function confirmSheet(title, text, yes) {
+  return new Promise(res => {
+    const el = document.createElement('div');
+    el.className = 'sheet-wrap';
+    el.innerHTML = `<div class="sheet"><h2></h2><p></p>
+      <button class="pill primary" data-a="yes"></button><button class="text-btn" data-a="no">Abbrechen</button></div>`;
+    el.querySelector('h2').textContent = title;
+    el.querySelector('p').textContent = text;
+    el.querySelector('[data-a=yes]').textContent = yes;
+    document.body.append(el);
+    const done = v => { el.remove(); res(v); };
+    el.querySelector('[data-a=yes]').addEventListener('click', () => done(true));
+    el.querySelector('[data-a=no]').addEventListener('click', () => done(false));
+  });
+}
+
+async function shareLink(info) {
+  const url = `${PUBLIC_URL}?join=${info.token}`;
+  try {
+    if (navigator.share) { await navigator.share({ title: 'MOTIF', text: 'Klebe mit mir Marken auf diese Seite:', url }); return; }
+  } catch (e) {
+    if (e.name === 'AbortError') return;
+  }
+  await navigator.clipboard.writeText(url);
+  toast('Link kopiert.');
+}
+
+function openShareSheet(page) {
+  const el = document.createElement('div');
+  el.className = 'sheet-wrap';
+  document.body.append(el);
+  const close = () => el.remove();
+  el.addEventListener('click', e => { if (e.target === el) close(); });
+
+  const afterChange = ({ removed }) => {
+    removed.forEach(id => album.forget(id));
+    album.clampCur();
+    album.preload();
+    album.render();
+  };
+
+  function paint() {
+    const info = store.sharedPage(page);
+    if (!info) {
+      const count = store.stamps.filter(s => Math.floor(s.slot / store.PER_PAGE) === page).length;
+      el.innerHTML = `<div class="sheet"><h2>Seite ${page + 1} teilen</h2>
+        <p>Lade andere ein, diese Seite mit dir zu befüllen. Marken auf dieser Seite werden dafür hochgeladen und alle Eingeladenen sehen sie${count ? `, auch deine ${count} vorhandenen` : ''}. Deine anderen Seiten bleiben privat auf dem Gerät.</p>
+        <button class="pill primary" data-a="create">Seite teilen</button>
+        <button class="text-btn" data-a="close">Abbrechen</button></div>`;
+      el.querySelector('[data-a=close]').addEventListener('click', close);
+      el.querySelector('[data-a=create]').addEventListener('click', async e => {
+        e.target.disabled = true;
+        e.target.textContent = 'Wird hochgeladen …';
+        try {
+          await sync.sharePage(page, profile.name);
+          album.render();
+          paint();
+        } catch {
+          toast('Teilen hat nicht geklappt. Bist du online?');
+          await syncNow();
+          paint();
+        }
+      });
+      return;
+    }
+
+    const owner = info.owner === auth.user.id;
+    el.innerHTML = `<div class="sheet"><h2></h2>
+      <ul class="members"></ul>
+      <button class="pill primary" data-a="invite">Einladungslink teilen</button>
+      <p class="sheet-note">Alle mit diesem Link können nach der Anmeldung mitmachen.</p>
+      <button class="text-btn" data-a="${owner ? 'end' : 'leave'}">${owner ? 'Teilen beenden' : 'Seite verlassen'}</button>
+      <button class="text-btn" data-a="close">Schließen</button></div>`;
+    el.querySelector('h2').textContent = info.title || 'Gemeinsame Seite';
+    const list = el.querySelector('.members');
+    for (const m of info.members) {
+      const li = document.createElement('li');
+      const name = document.createElement('span');
+      name.textContent = (m.display_name || 'Ohne Namen') + (m.user_id === info.owner ? ' · hat eingeladen' : '');
+      li.append(name);
+      if (owner && m.user_id !== auth.user.id) {
+        const kick = document.createElement('button');
+        kick.className = 'text-btn';
+        kick.textContent = 'Entfernen';
+        kick.addEventListener('click', async () => {
+          if (!await confirmSheet('Person entfernen?', 'Die Person sieht die Seite dann nicht mehr. Ihre Marken bleiben hier, bis du sie löschst.', 'Entfernen')) return;
+          try { afterChange(await sync.removeMember(page, m.user_id)); paint(); } catch { toast('Das hat nicht geklappt. Bist du online?'); }
+        });
+        li.append(kick);
+      }
+      list.append(li);
+    }
+    el.querySelector('[data-a=close]').addEventListener('click', close);
+    el.querySelector('[data-a=invite]').addEventListener('click', () => shareLink(info));
+    el.querySelector('[data-a=end]')?.addEventListener('click', async () => {
+      if (!await confirmSheet('Teilen beenden?', 'Die Seite und alle ihre Marken werden für alle gelöscht, auch deine eigenen auf dieser Seite.', 'Für alle löschen')) return;
+      try { afterChange(await sync.endSharing(page)); close(); } catch { toast('Das hat nicht geklappt. Bist du online?'); }
+    });
+    el.querySelector('[data-a=leave]')?.addEventListener('click', async () => {
+      if (!await confirmSheet('Seite verlassen?', 'Die Seite verschwindet aus deinem Album. Deine Marken bleiben für die anderen sichtbar, bis jemand sie löscht.', 'Verlassen')) return;
+      try { afterChange(await sync.leave(page)); close(); } catch { toast('Das hat nicht geklappt. Bist du online?'); }
+    });
+  }
+  paint();
+}
+
 /* ---------- Große Ansicht ---------- */
 
 async function openDetail(stamp, from) {
@@ -250,7 +420,7 @@ async function openDetail(stamp, from) {
       <div class="detail-row">
         <div>
           <b>${fmtDate(stamp.createdAt)}</b>
-          <span>Seite ${Math.floor(stamp.slot / store.PER_PAGE) + 1}</span>
+          <span class="detail-meta"></span>
         </div>
         <button class="delete-btn" data-a="delete">${icons.trash}<span>Marke löschen</span></button>
       </div>
@@ -264,11 +434,23 @@ async function openDetail(stamp, from) {
   const descInput = el.querySelector('.stamp-desc');
   nameInput.value = stamp.name || '';
   descInput.value = stamp.desc || '';
+  el.querySelector('.detail-meta').textContent = stamp.shared
+    ? `von ${stamp.shared.ownerName || 'jemandem'}`
+    : `Seite ${Math.floor(stamp.slot / store.PER_PAGE) + 1}`;
+  if (!sync.isMine(stamp)) {
+    nameInput.readOnly = descInput.readOnly = true;
+    nameInput.hidden = !stamp.name;
+    descInput.hidden = !stamp.desc;
+  }
+  if (!sync.canDelete(stamp)) el.querySelector('[data-a=delete]').hidden = true;
   let saveTimer = 0;
   const saveText = () => {
     clearTimeout(saveTimer);
     const name = nameInput.value.trim(), desc = descInput.value.trim();
-    if (name !== (stamp.name || '') || desc !== (stamp.desc || '')) store.updateStamp(stamp, { name, desc });
+    if (!sync.isMine(stamp)) return;
+    if (name !== (stamp.name || '') || desc !== (stamp.desc || '')) {
+      Promise.resolve(store.updateStamp(stamp, { name, desc })).catch(() => toast('Speichern hat nicht geklappt.'));
+    }
   };
   for (const field of [nameInput, descInput]) {
     field.addEventListener('input', () => { clearTimeout(saveTimer); saveTimer = setTimeout(saveText, 400); });
@@ -282,7 +464,7 @@ async function openDetail(stamp, from) {
     const hi = new Image();
     hi.onload = () => { if (el.isConnected) img.src = fullUrl; };
     hi.src = fullUrl;
-  });
+  }).catch(() => {});
 
   const zoomFrames = () => {
     const to = wrap.getBoundingClientRect();
@@ -336,7 +518,12 @@ async function openDetail(stamp, from) {
       return;
     }
     clearTimeout(saveTimer);
-    await store.deleteStamp(stamp);
+    try {
+      await store.deleteStamp(stamp);
+    } catch {
+      toast('Löschen hat nicht geklappt. Bist du online?');
+      return;
+    }
     album.forget(stamp.id);
     album.clampCur();
     album.render();
@@ -369,6 +556,12 @@ async function devSeed(n) {
 
 async function boot() {
   await document.fonts?.ready;
+  const params = new URLSearchParams(location.search);
+  if (params.has('join')) {
+    localStorage.setItem(PENDING_JOIN, params.get('join'));
+    params.delete('join');
+    history.replaceState(null, '', location.pathname + (params.size ? `?${params}` : ''));
+  }
   let recovering = false;
   await auth.init({
     onRecovery: () => {

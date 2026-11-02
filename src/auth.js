@@ -23,6 +23,7 @@ function fail(error) {
 }
 
 export const isConfigured = () => !!client;
+export const getClient = () => client;
 
 export async function init({ onRecovery }) {
   if (URL_ && KEY) {
