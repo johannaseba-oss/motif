@@ -1,6 +1,8 @@
 // Alles liegt lokal in IndexedDB. Vorschaubilder und Originale sind getrennt,
 // damit das Album nicht alle großen Bilder laden muss.
-const DB_NAME = 'perfo';
+// Jedes Konto hat auf dem Gerät sein eigenes Album.
+const LEGACY_DB = 'perfo';
+const LEGACY_DONE = 'motif.legacyAlbumMoved';
 let db;
 
 function req(r) {
@@ -19,9 +21,9 @@ export const PER_PAGE = 16;
 export const stamps = []; // {id, slot, createdAt, thumb}
 export const bySlot = new Map();
 
-export async function open() {
-  db = await new Promise((res, rej) => {
-    const r = indexedDB.open(DB_NAME, 1);
+function openDb(name) {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open(name, 1);
     r.onupgradeneeded = () => {
       r.result.createObjectStore('stamps', { keyPath: 'id' });
       r.result.createObjectStore('full');
@@ -30,12 +32,48 @@ export async function open() {
     r.onsuccess = () => res(r.result);
     r.onerror = () => rej(r.error);
   });
+}
+
+// Das Album aus der Zeit vor den Konten geht an das erste Konto, das sich hier anmeldet
+async function adoptLegacyAlbum() {
+  if (localStorage.getItem(LEGACY_DONE)) return;
+  const known = await indexedDB.databases?.();
+  if (known?.some(d => d.name === LEGACY_DB)) {
+    const old = await openDb(LEGACY_DB);
+    const read = async store => {
+      const os = old.transaction(store).objectStore(store);
+      const [keys, values] = await Promise.all([req(os.getAllKeys()), req(os.getAll())]);
+      return keys.map((key, i) => [key, values[i]]);
+    };
+    const [stampRows, fullRows, metaRows] = [await read('stamps'), await read('full'), await read('meta')];
+    await tx(['stamps', 'full', 'meta'], 'readwrite', t => {
+      for (const [, v] of stampRows) t.objectStore('stamps').put(v);
+      for (const [k, v] of fullRows) t.objectStore('full').put(v, k);
+      for (const [k, v] of metaRows) t.objectStore('meta').put(v, k);
+    });
+    old.close();
+    indexedDB.deleteDatabase(LEGACY_DB);
+  }
+  localStorage.setItem(LEGACY_DONE, '1');
+}
+
+export async function open(accountId) {
+  db = await openDb(`motif-${accountId}`);
+  await adoptLegacyAlbum();
   navigator.storage?.persist?.().catch(() => {});
   const all = await req(db.transaction('stamps').objectStore('stamps').getAll());
   stamps.length = 0;
   stamps.push(...all);
   bySlot.clear();
   for (const s of stamps) bySlot.set(s.slot, s);
+  pageTitles = (await req(db.transaction('meta').objectStore('meta').get('pageTitles'))) || {};
+}
+
+let pageTitles = {};
+export const getPageTitle = page => pageTitles[page] || '';
+export function setPageTitle(page, title) {
+  if (title) pageTitles[page] = title; else delete pageTitles[page];
+  return tx('meta', 'readwrite', t => t.objectStore('meta').put(pageTitles, 'pageTitles'));
 }
 
 export async function getProfile() {
@@ -53,7 +91,8 @@ export function firstFreeSlot() {
 export function usedPages() {
   let max = -1;
   for (const s of stamps) if (s.slot > max) max = s.slot;
-  return max < 0 ? 0 : Math.floor(max / PER_PAGE) + 1;
+  const stampPages = max < 0 ? 0 : Math.floor(max / PER_PAGE) + 1;
+  return Math.max(stampPages, ...Object.keys(pageTitles).map(p => +p + 1));
 }
 
 export async function addStamp({ full, thumb, createdAt = Date.now() }) {
@@ -81,6 +120,11 @@ export async function moveStamp(s, slot) {
     if (other) t.objectStore('stamps').put(other);
   });
   return other;
+}
+
+export function updateStamp(s, fields) {
+  Object.assign(s, fields);
+  return tx('stamps', 'readwrite', t => t.objectStore('stamps').put(s));
 }
 
 export async function deleteStamp(s) {

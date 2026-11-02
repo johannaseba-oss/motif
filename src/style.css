@@ -142,6 +142,22 @@ button svg { width: 24px; height: 24px; display: block; }
 .shade { width: calc(100% + .75px); height: 100%; background: #000; opacity: 0; pointer-events: none; }
 .back { transform: rotateY(180deg); }
 
+.page-title-input {
+  position: absolute;
+  z-index: 3;
+  padding: 0;
+  font-family: inherit;
+  font-weight: 900;
+  color: var(--ink);
+  background: var(--paper);
+  border: 0;
+  border-radius: 0;
+  outline: 0;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.page-title-input::placeholder { color: #b5b5b5; }
+
 .ghost {
   position: fixed;
   z-index: 50;
@@ -266,31 +282,44 @@ span.cam-side { width: 48px; }
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: calc(var(--safe-t) + 78px) calc(var(--safe-r) + 26px) calc(var(--safe-b) + 24px) calc(var(--safe-l) + 26px);
+  overflow-y: auto;
+  padding: calc(var(--safe-t) + 74px) calc(var(--safe-r) + 26px) calc(var(--safe-b) + 20px) calc(var(--safe-l) + 26px);
 }
 .detail-bg { position: absolute; inset: 0; }
 .detail-stamp {
   position: relative;
-  flex: 0 1 auto;
-  min-height: 0;
-  height: min(100%, (100vw - 62px) / .7438);
+  flex: none;
+  height: max(180px, min(100dvh - 330px - var(--safe-t) - var(--safe-b), (100vw - 52px) / .7438));
   aspect-ratio: .7438;
-  max-width: 100%;
-  filter: drop-shadow(7px 8px 0 var(--ink));
   will-change: transform;
 }
 .detail-stamp img { width: 100%; height: 100%; display: block; object-fit: contain; }
 .detail-info {
   position: relative;
   flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
   width: 100%;
   max-width: 420px;
-  margin-top: 28px;
+  margin-top: 18px;
   transition: opacity .15s;
 }
+.stamp-name, .stamp-desc {
+  display: block;
+  width: 100%;
+  padding: 6px 0;
+  font: inherit;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  outline: 0;
+  resize: none;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.stamp-name { font-weight: 900; font-size: 22px; }
+.stamp-desc { font-size: 16px; line-height: 1.35; }
+.stamp-name::placeholder, .stamp-desc::placeholder { color: #b5b5b5; }
+.detail-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 10px; }
 .detail-info b { display: block; font-weight: 500; font-size: 16px; }
 .detail-info span { display: block; margin-top: 3px; font-size: 14px; color: var(--soft); }
 .delete-btn {
@@ -315,3 +344,14 @@ span.cam-side { width: 48px; }
 .detail.leaving { background: transparent; pointer-events: none; }
 .detail.leaving .detail-info, .detail.leaving .detail-close { opacity: 0; }
 .detail.leaving .detail-bg { display: none; }
+
+/* ---------- Anmelden ---------- */
+
+.auth form { display: flex; flex-direction: column; align-items: center; width: 100%; max-width: 420px; flex: none; }
+.auth .primary { margin-top: 28px; }
+.form-msg { width: 100%; margin: 18px 0 0; font-size: 15px; line-height: 1.4; }
+.form-msg.error { font-weight: 500; }
+.auth-links { display: flex; flex-direction: column; align-items: center; gap: 4px; margin-top: 20px; flex: none; }
+.text-btn { min-height: 44px; padding: 0 12px; background: transparent; font-size: 15px; font-weight: 500; text-decoration: underline; text-underline-offset: 3px; flex: none; }
+.account-mail { margin: 26px 0 0; font-size: 14px; color: var(--soft); flex: none; }
+.profile > .text-btn { margin-top: 4px; }

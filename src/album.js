@@ -101,7 +101,8 @@ export class Album {
   computeGrid() {
     const { pw, ph } = this;
     const padX = pw * 0.075;
-    const padTop = ph * 0.05;
+    const headH = Math.max(46, ph * 0.09);
+    const padTop = headH;
     const padBottom = Math.max(30, ph * 0.065);
     const availH = ph - padTop - padBottom;
     const gapX = pw * 0.035;
@@ -111,7 +112,8 @@ export class Album {
     const gapY = Math.min((availH - ch * 4) / 3, cw * 0.85);
     const realGapX = (pw - 2 * padX - cw * 4) / 3;
     const top = padTop + (availH - (ch * 4 + gapY * 3)) / 2;
-    return { cw, ch, gapX: realGapX, gapY, padX, top };
+    const titleSize = Math.max(18, pw * 0.058);
+    return { cw, ch, gapX: realGapX, gapY, padX, top, headH, titleSize };
   }
 
   cellRect(cell) {
@@ -143,6 +145,15 @@ export class Album {
     g.fillRect(side === 'r' ? 0 : pw - gw, 0, gw, ph);
 
     if (page != null) {
+      const title = store.getPageTitle(page);
+      const { padX, headH, titleSize } = this.grid;
+      g.font = `900 ${titleSize}px Rubik, system-ui, sans-serif`;
+      g.fillStyle = title ? INK : '#c8c8c8';
+      g.textAlign = 'left';
+      g.textBaseline = 'middle';
+      g.fillText(title || 'Seite benennen', padX, headH * 0.58, pw - 2 * padX);
+      g.textBaseline = 'alphabetic';
+
       for (let cell = 0; cell < PER_PAGE; cell++) {
         const slot = page * PER_PAGE + cell;
         const s = store.bySlot.get(slot);
@@ -439,7 +450,51 @@ export class Album {
       this.settleFlip(fast || far);
       return;
     }
-    if (g.mode === 'wait' && g.stamp) this.onOpen?.(g.stamp, this.cellClientRect(g.stamp.slot));
+    if (g.mode !== 'wait') return;
+    if (g.stamp) { this.onOpen?.(g.stamp, this.cellClientRect(g.stamp.slot)); return; }
+    const titlePage = this.titlePageAt(e.clientX, e.clientY);
+    if (titlePage != null) this.editTitle(titlePage);
+  }
+
+  /* ---------- Seitentitel ---------- */
+
+  titlePageAt(clientX, clientY) {
+    const b = this.book.getBoundingClientRect();
+    const x = clientX - b.left, y = clientY - b.top;
+    if (x < 0 || x > b.width || y < 0 || y > this.grid.headH) return null;
+    return this.spread && x >= this.pw ? this.cur + 1 : this.cur;
+  }
+
+  editTitle(page) {
+    const { padX, headH, titleSize } = this.grid;
+    const input = document.createElement('input');
+    input.className = 'page-title-input';
+    input.maxLength = 40;
+    input.placeholder = 'Seite benennen';
+    input.value = store.getPageTitle(page);
+    input.setAttribute('aria-label', `Titel von Seite ${page + 1}`);
+    const offset = this.spread && page === this.cur + 1 ? this.pw : 0;
+    Object.assign(input.style, {
+      left: offset + padX + 'px',
+      top: headH * 0.58 - titleSize * 0.75 + 'px',
+      width: this.pw - 2 * padX + 'px',
+      height: titleSize * 1.5 + 'px',
+      fontSize: titleSize + 'px',
+    });
+    for (const type of ['pointerdown', 'pointermove', 'pointerup']) input.addEventListener(type, e => e.stopPropagation());
+    let done = false;
+    const commit = async () => {
+      if (done) return;
+      done = true;
+      input.remove();
+      await store.setPageTitle(page, input.value.trim());
+      this.render();
+    };
+    input.addEventListener('blur', commit);
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') commit(); });
+    this.book.append(input);
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
   }
 
   cancel(e) {
