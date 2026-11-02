@@ -1,0 +1,10 @@
+{
+  "appId": "com.perfo.app",
+  "appName": "MOTIF",
+  "webDir": "dist",
+  "ios": {
+    "contentInset": "never",
+    "backgroundColor": "#ffffff",
+    "scrollEnabled": false
+  }
+}

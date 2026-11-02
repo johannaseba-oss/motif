@@ -1,0 +1,29 @@
+{
+  "name": "perfo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MOTIF – Kamera-App, die Fotos als Briefmarken in ein Album klebt (iOS, Capacitor)",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host",
+    "dev:phone": "vite --host --mode phone",
+    "build": "vite build",
+    "preview": "vite preview --host",
+    "assets:shape": "node tools/trace_shape.mjs",
+    "ios:add": "npx cap add ios && node tools/patch_ios.mjs",
+    "ios:sync": "vite build && npx cap sync ios",
+    "ios:open": "npx cap open ios"
+  },
+  "dependencies": {
+    "@capacitor/core": "^8.5.3",
+    "@capacitor/haptics": "^8.0.2",
+    "@capacitor/ios": "^8.5.3",
+    "@fontsource/rubik": "^5.2.8"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.5.3",
+    "@vitejs/plugin-basic-ssl": "^2.1.0",
+    "sharp": "^0.34.4",
+    "vite": "^8.3.3"
+  }
+}
