@@ -3,7 +3,7 @@ const KEY = 'motif.devAuth';
 const load = () => JSON.parse(localStorage.getItem(KEY) || '{"users":{},"session":null}');
 const save = s => localStorage.setItem(KEY, JSON.stringify(s));
 const err = message => ({ data: {}, error: { message } });
-const pub = (email, u) => ({ id: u.id, email, identities: [{}] });
+const pub = (email, u) => ({ id: u.id, email, identities: [{}], user_metadata: u.meta || {} });
 
 export const devClient = {
   isDev: true,
@@ -30,9 +30,10 @@ export const devClient = {
       return { data: { user: pub(email, s.users[email]) }, error: null };
     },
     async resetPasswordForEmail() { return { error: null }; },
-    async updateUser({ password }) {
+    async updateUser({ password, data }) {
       const s = load();
-      s.users[s.session].password = password;
+      if (password) s.users[s.session].password = password;
+      if (data) s.users[s.session].meta = { ...s.users[s.session].meta, ...data };
       save(s);
       return { data: { user: pub(s.session, s.users[s.session]) }, error: null };
     },

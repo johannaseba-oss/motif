@@ -68,6 +68,14 @@ export async function setPassword(password) {
   user = data.user;
 }
 
+// Der Profilname gehört zum Konto, damit jeder Browser ihn kennt. Fotos bleiben auf dem Gerät.
+export const accountName = () => user?.user_metadata?.display_name || '';
+export async function setAccountName(name) {
+  const { data, error } = await client.auth.updateUser({ data: { display_name: name } });
+  if (error) throw error;
+  user = data.user;
+}
+
 export async function signOut() {
   // Auch ohne Netz abmelden: die Sitzung auf diesem Gerät wird in jedem Fall entfernt
   await client.auth.signOut({ scope: 'local' }).catch(() => {});

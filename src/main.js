@@ -120,6 +120,14 @@ async function enterApp() {
   await store.open(auth.user.id);
   await sync.init();
   profile = await store.getProfile();
+  // Name kommt aus dem Konto, damit ein neuer Browser nicht wieder nach dem Profil fragt
+  const accountName = auth.accountName();
+  if (accountName && profile?.name !== accountName) {
+    profile = { avatar: null, createdAt: Date.parse(auth.user.created_at) || Date.now(), ...profile, name: accountName };
+    await store.saveProfile(profile);
+  } else if (profile && !accountName) {
+    auth.setAccountName(profile.name).catch(() => {});
+  }
   setAvatarUrl();
   if (import.meta.env.DEV) {
     const q = new URLSearchParams(location.search);
@@ -193,6 +201,7 @@ function profileForm({ first }) {
     if (!name) return;
     profile = { name, avatar: draftAvatar, createdAt: profile?.createdAt || Date.now() };
     await store.saveProfile(profile);
+    auth.setAccountName(name).catch(() => {});
     sync.setDisplayName(name).catch(() => {});
     setAvatarUrl();
     close();
