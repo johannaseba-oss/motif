@@ -9,6 +9,7 @@ import { openCamera } from './camera.js';
 import { punchOut, pinToAlbum } from './punch.js';
 import * as auth from './auth.js';
 import * as sync from './sync.js';
+import * as cloud from './cloud.js';
 import { icons } from './icons.js';
 import { tick } from './haptics.js';
 
@@ -119,6 +120,7 @@ async function enterApp() {
   app.innerHTML = '';
   await store.open(auth.user.id);
   await sync.init();
+  await cloud.init();
   profile = await store.getProfile();
   // Name kommt aus dem Konto, damit ein neuer Browser nicht wieder nach dem Profil fragt
   const accountName = auth.accountName();
@@ -132,7 +134,7 @@ async function enterApp() {
   if (import.meta.env.DEV) {
     const q = new URLSearchParams(location.search);
     if (q.has('seed') && !store.stamps.length) await devSeed(+q.get('seed') || 40);
-    window.__perfo = { store, auth, sync, get album() { return album; } };
+    window.__perfo = { store, auth, sync, cloud, get album() { return album; } };
   }
   if (profile) showAlbum();
   else profileForm({ first: true });
@@ -160,7 +162,7 @@ function profileForm({ first }) {
     </label>
     ${first ? '' : `<div class="stats"><div><b>${store.stamps.length}</b><span>${store.stamps.length === 1 ? 'Marke' : 'Marken'}</span></div><div><b>${pages}</b><span>${pages === 1 ? 'Seite' : 'Seiten'}</span></div><div class="since"><b>${fmtDate(profile.createdAt)}</b><span>dabei seit</span></div></div>`}
     <button class="pill primary" data-a="save">${first ? 'Album öffnen' : 'Speichern'}</button>
-    ${first ? '' : `<p class="account-mail"></p><button class="text-btn" data-a="logout">Abmelden</button>`}`;
+    ${first ? '' : `<p class="backup-state" role="status"></p><p class="account-mail"></p><button class="text-btn" data-a="logout">Abmelden</button>`}`;
   app.append(el);
 
   const input = el.querySelector('input');
@@ -190,6 +192,18 @@ function profileForm({ first }) {
   const close = () => { if (draftUrl) URL.revokeObjectURL(draftUrl); el.remove(); };
   const mail = el.querySelector('.account-mail');
   if (mail) mail.textContent = auth.user.email;
+  const backup = el.querySelector('.backup-state');
+  if (backup) {
+    const paintBackup = () => {
+      if (!el.isConnected) { clearInterval(backupTimer); return; }
+      const open = store.pendingUploads();
+      backup.textContent = open === 0 && !cloud.lastError
+        ? 'Dein Album ist im Konto gesichert.'
+        : `Noch ${open} ${open === 1 ? 'Änderung' : 'Änderungen'} werden gesichert${cloud.lastError ? ', sobald es wieder klappt. Bist du online?' : ' …'}`;
+    };
+    const backupTimer = setInterval(paintBackup, 1500);
+    paintBackup();
+  }
   el.querySelector('[data-a=logout]')?.addEventListener('click', async () => {
     await auth.signOut();
     location.reload();
@@ -199,7 +213,10 @@ function profileForm({ first }) {
   save.addEventListener('click', async () => {
     const name = input.value.trim();
     if (!name) return;
-    profile = { name, avatar: draftAvatar, createdAt: profile?.createdAt || Date.now() };
+    profile = {
+      ...profile, name, avatar: draftAvatar, createdAt: profile?.createdAt || Date.now(),
+      avatarDirty: profile?.avatarDirty || (!!draftAvatar && draftAvatar !== profile?.avatar),
+    };
     await store.saveProfile(profile);
     auth.setAccountName(name).catch(() => {});
     sync.setDisplayName(name).catch(() => {});
@@ -281,9 +298,15 @@ let sharingStarted = false;
 async function syncNow() {
   if (!album || album.drag || album.flip || album.gesture) return;
   try {
-    const { changed, removed } = await sync.refresh();
+    const { changed, removed, avatar } = await cloud.syncAll(() => !!(album.drag || album.flip || album.gesture));
     removed.forEach(id => album.forget(id));
     if (changed) { album.clampCur(); album.preload(); album.render(); }
+    profile = await store.getProfile() || profile;
+    if (avatar === 'pulled') {
+      setAvatarUrl();
+      const btn = document.querySelector('.profile-btn');
+      if (btn) btn.innerHTML = avatarHtml();
+    }
   } catch { /* offline: beim nächsten Mal */ }
 }
 
@@ -292,6 +315,10 @@ async function startSharing() {
   sharingStarted = true;
   sync.handlers.failed = () => toast('Hochladen hat nicht geklappt. Die Marke liegt wieder privat in deinem Album.');
   sync.handlers.changed = () => { album.preload(); album.render(); };
+  let soon = 0;
+  const syncSoon = () => { clearTimeout(soon); soon = setTimeout(syncNow, 800); };
+  store.setOnChange(syncSoon);
+  cloud.setTrigger(syncSoon);
   await syncNow();
   setInterval(() => { if (!document.hidden) syncNow(); }, 20000);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) syncNow(); });
@@ -365,6 +392,7 @@ function openShareSheet(page) {
         try {
           await sync.sharePage(page, profile.name);
           album.render();
+          cloud.trigger();
           paint();
         } catch {
           toast('Teilen hat nicht geklappt. Bist du online?');

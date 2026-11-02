@@ -68,6 +68,70 @@ export async function open(accountId) {
   for (const s of stamps) bySlot.set(s.slot, s);
   pageTitles = (await req(db.transaction('meta').objectStore('meta').get('pageTitles'))) || {};
   shared = (await req(db.transaction('meta').objectStore('meta').get('sharedPages'))) || {};
+  deleted = (await req(db.transaction('meta').objectStore('meta').get('tombstones'))) || [];
+  dirtyTitles = (await req(db.transaction('meta').objectStore('meta').get('dirtyTitles'))) || {};
+}
+
+/* Abgleich mit dem Konto: gelöschte Marken und geänderte Titel warten hier, bis Netz da ist */
+let deleted = [];
+let dirtyTitles = {};
+let cloudFull = null;
+let onChange = () => {};
+export const setCloudFull = f => { cloudFull = f; };
+export const setOnChange = f => { onChange = f; };
+const saveMeta = (key, value) => tx('meta', 'readwrite', t => t.objectStore('meta').put(value, key));
+export const tombstones = () => [...deleted];
+export function clearTombstone(id) {
+  deleted = deleted.filter(x => x !== id);
+  return saveMeta('tombstones', deleted);
+}
+function addTombstone(id) {
+  if (!deleted.includes(id)) deleted.push(id);
+  return saveMeta('tombstones', deleted);
+}
+export const pendingUploads = () => stamps.filter(s => !s.shared && (!s.synced || s.dirty)).length + deleted.length;
+
+// Marke wurde auf einem anderen Gerät gelöscht
+export async function dropPrivate(s) {
+  await tx(['stamps', 'full'], 'readwrite', t => {
+    t.objectStore('stamps').delete(s.id);
+    t.objectStore('full').delete(s.id);
+  });
+  stamps.splice(stamps.indexOf(s), 1);
+  if (bySlot.get(s.slot) === s) bySlot.delete(s.slot);
+}
+
+export function applyRemoteTitles(remote) {
+  let changed = false;
+  const next = { ...remote, ...dirtyTitles };
+  for (const k of Object.keys(next)) if (!next[k]) delete next[k];
+  if (JSON.stringify(next) !== JSON.stringify(pageTitles)) { pageTitles = next; changed = true; saveMeta('pageTitles', pageTitles); }
+  return changed;
+}
+export function mergedTitles(remote) {
+  const next = { ...remote, ...dirtyTitles };
+  for (const k of Object.keys(next)) if (!next[k]) delete next[k];
+  return next;
+}
+export async function clearDirtyTitles() {
+  if (!Object.keys(dirtyTitles).length) return;
+  dirtyTitles = {};
+  await saveMeta('dirtyTitles', dirtyTitles);
+}
+
+export const currentSharedMap = () => Object.fromEntries(Object.entries(shared).map(([page, info]) => [page, info.id]));
+
+// Gemeinsame Seiten auf die im Konto gemerkte Albumseite legen
+export function applySharedPlaces(map) {
+  let changed = false;
+  for (const [page, id] of Object.entries(map || {})) {
+    const cur = pageOfShared(id);
+    if (cur == null || cur === +page || shared[page]) continue;
+    shared[page] = shared[cur];
+    delete shared[cur];
+    changed = true;
+  }
+  return changed;
 }
 
 /* Gemeinsame Seiten: Albumseite -> Angaben vom Server. Die Serverzugriffe kommen aus sync.js. */
@@ -108,10 +172,14 @@ export function dropRule(s, slot) {
   return other?.shared ? false : true;
 }
 
-export const deleteLocalRecord = id => tx(['stamps', 'full'], 'readwrite', t => {
-  t.objectStore('stamps').delete(id);
-  t.objectStore('full').delete(id);
-});
+export async function deleteLocalRecord(id) {
+  await tx(['stamps', 'full'], 'readwrite', t => {
+    t.objectStore('stamps').delete(id);
+    t.objectStore('full').delete(id);
+  });
+  await addTombstone(id);
+  onChange();
+}
 export const persistLocal = s => tx('stamps', 'readwrite', t => t.objectStore('stamps').put(s));
 
 let pageTitles = {};
@@ -122,7 +190,10 @@ export function setPageTitle(page, title) {
 }
 export function setPageTitleLocal(page, title) {
   if (title) pageTitles[page] = title; else delete pageTitles[page];
-  return tx('meta', 'readwrite', t => t.objectStore('meta').put(pageTitles, 'pageTitles'));
+  dirtyTitles[page] = title;
+  saveMeta('dirtyTitles', dirtyTitles);
+  onChange();
+  return saveMeta('pageTitles', pageTitles);
 }
 
 export async function getProfile() {
@@ -152,6 +223,7 @@ export async function addStamp({ full, thumb, createdAt = Date.now() }) {
   });
   stamps.push(s);
   bySlot.set(s.slot, s);
+  onChange();
   return s;
 }
 
@@ -165,17 +237,21 @@ export async function moveStamp(s, slot) {
   bySlot.delete(from);
   s.slot = slot;
   bySlot.set(slot, s);
-  if (other) { other.slot = from; bySlot.set(from, other); }
+  s.dirty = true;
+  if (other) { other.slot = from; other.dirty = true; bySlot.set(from, other); }
   await tx('stamps', 'readwrite', t => {
     t.objectStore('stamps').put(s);
     if (other) t.objectStore('stamps').put(other);
   });
+  onChange();
   return other;
 }
 
 export function updateStamp(s, fields) {
   if (s.shared) return ops.update(s, fields);
   Object.assign(s, fields);
+  s.dirty = true;
+  onChange();
   return tx('stamps', 'readwrite', t => t.objectStore('stamps').put(s));
 }
 
@@ -187,10 +263,17 @@ export async function deleteStamp(s) {
   });
   stamps.splice(stamps.indexOf(s), 1);
   bySlot.delete(s.slot);
+  await addTombstone(s.id);
+  onChange();
 }
 
-export function getFull(id) {
+export async function getFull(id) {
   const s = stamps.find(x => x.id === id);
   if (s?.shared && !s.pending) return ops.full(s);
-  return req(db.transaction('full').objectStore('full').get(id));
+  const local = await req(db.transaction('full').objectStore('full').get(id));
+  if (local || !s?.synced) return local;
+  // Marke von einem anderen Gerät: Original nachladen und auf diesem Gerät behalten
+  const blob = await cloudFull(id);
+  await tx('full', 'readwrite', t => t.objectStore('full').put(blob, id));
+  return blob;
 }

@@ -39,6 +39,11 @@ export async function init({ onRecovery }) {
   });
   const { data } = await client.auth.getSession();
   user = data.session?.user || null;
+  // Die gemerkte Sitzung kann veraltet sein: Kontodaten frisch holen, ohne Netz reicht die alte
+  if (user && client.auth.getUser) {
+    const fresh = await client.auth.getUser().catch(() => null);
+    if (fresh?.data?.user) user = fresh.data.user;
+  }
 }
 
 // Liefert true, wenn zuerst die E-Mail bestätigt werden muss

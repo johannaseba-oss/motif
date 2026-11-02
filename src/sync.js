@@ -8,6 +8,12 @@ const { PER_PAGE } = store;
 let api = null;
 let refreshing = false;
 export const handlers = { failed() {}, changed() {} };
+let preferred = {};
+export const setPreferredPages = map => { preferred = map || {}; };
+function placeFor(id) {
+  const hit = Object.entries(preferred).find(([, v]) => v === id);
+  return hit && !store.isShared(+hit[0]) ? +hit[0] : store.firstEmptyPage();
+}
 
 export async function init() {
   const client = auth.getClient();
@@ -65,7 +71,7 @@ export async function refresh() {
     }
     for (const info of pages) {
       let page = store.pageOfShared(info.id);
-      if (page == null) { page = store.firstEmptyPage(); changed = true; }
+      if (page == null) { page = placeFor(info.id); changed = true; }
       const old = store.sharedPage(page);
       if (old?.title !== info.title || old?.members.length !== info.members.length) changed = true;
       store.setSharedPage(page, info);

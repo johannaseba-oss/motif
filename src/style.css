@@ -423,3 +423,6 @@ span.cam-side { width: 48px; }
 }
 .zoom-row button.on { background: var(--ink); color: var(--paper); }
 .cam-bar { height: 104px; padding-top: 12px; }
+
+.backup-state { margin: 22px 0 0; font-size: 14px; line-height: 1.35; text-align: center; flex: none; }
+.backup-state + .account-mail { margin-top: 6px; }
