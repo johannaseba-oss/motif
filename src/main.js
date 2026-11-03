@@ -136,8 +136,30 @@ async function enterApp() {
     if (q.has('seed') && !store.stamps.length) await devSeed(+q.get('seed') || 40);
     window.__perfo = { store, auth, sync, cloud, get album() { return album; } };
   }
+  // Nur im Dev-Server: ?shot = leere Albumseite ohne Kopfzeile, ?shot=page = nur die Seite bildschirmfüllend
+  const shot = import.meta.env.DEV ? new URLSearchParams(location.search).get('shot') : null;
+  if (shot != null && !profile) {
+    profile = { name: 'Demo', avatar: null, createdAt: Date.now() };
+    await store.saveProfile(profile);
+  }
   if (profile) showAlbum();
   else profileForm({ first: true });
+  if (shot != null) devShot(shot);
+}
+
+function devShot(mode) {
+  album.plain = true;
+  album.render();
+  if (mode !== 'page') return;
+  const W = innerWidth, H = innerHeight;
+  Object.assign(album, { pw: W, ph: H, dpr: devicePixelRatio || 1 });
+  album.grid = album.computeGrid();
+  const c = document.createElement('canvas');
+  c.width = W * album.dpr;
+  c.height = H * album.dpr;
+  Object.assign(c.style, { position: 'fixed', inset: 0, width: W + 'px', height: H + 'px', zIndex: 99 });
+  album.drawPage(c.getContext('2d'), 0, 'r');
+  document.body.append(c);
 }
 
 /* ---------- Profil anlegen und bearbeiten ---------- */
@@ -459,7 +481,10 @@ async function openDetail(stamp, from) {
           <b>${fmtDate(stamp.createdAt)}</b>
           <span class="detail-meta"></span>
         </div>
-        <button class="delete-btn" data-a="delete">${icons.trash}<span>Marke löschen</span></button>
+      </div>
+      <div class="detail-actions">
+        <button class="delete-btn" data-a="export">${icons.export}<span>Exportieren</span></button>
+        <button class="delete-btn" data-a="delete" aria-label="Marke löschen">${icons.trash}<span>Löschen</span></button>
       </div>
     </div>
     <button class="round detail-close" aria-label="Schließen">${icons.close}</button>`;
@@ -537,6 +562,16 @@ async function openDetail(stamp, from) {
   el.querySelector('.detail-bg').addEventListener('click', close);
   wrap.addEventListener('click', close);
 
+  el.querySelector('[data-a=export]').addEventListener('click', async () => {
+    if (tooSoon()) return;
+    try {
+      const blob = await store.getFull(stamp.id);
+      await exportStamp(blob, stamp);
+    } catch (e) {
+      if (e?.name !== 'AbortError') toast('Exportieren hat nicht geklappt.');
+    }
+  });
+
   const del = el.querySelector('[data-a=delete]');
   let armed = false;
   del.addEventListener('click', async () => {
@@ -550,7 +585,7 @@ async function openDetail(stamp, from) {
         if (!del.isConnected) return;
         armed = false;
         del.classList.remove('armed');
-        del.innerHTML = `${icons.trash}<span>Marke löschen</span>`;
+        del.innerHTML = `${icons.trash}<span>Löschen</span>`;
       }, 3000);
       return;
     }
@@ -567,6 +602,24 @@ async function openDetail(stamp, from) {
     if (fullUrl) URL.revokeObjectURL(fullUrl);
     el.remove();
   });
+}
+
+async function exportStamp(blob, stamp) {
+  const day = new Date(stamp.createdAt).toISOString().slice(0, 10);
+  const base = (stamp.name || 'marke').toLowerCase().replace(/[^a-z0-9äöüß]+/g, '-').replace(/^-|-$/g, '') || 'marke';
+  const file = new File([blob], `motif-${base}-${day}.png`, { type: 'image/png' });
+  if (navigator.canShare?.({ files: [file] })) {
+    await navigator.share({ files: [file] });
+    return;
+  }
+  const url = URL.createObjectURL(file);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = file.name;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
 /* ---------- Start ---------- */
@@ -593,6 +646,12 @@ async function devSeed(n) {
 
 async function boot() {
   await document.fonts?.ready;
+  if (import.meta.env.DEV && new URLSearchParams(location.search).has('shot')) {
+    // Eigenes leeres Testkonto, damit kein echtes Album auf dem Bild landet
+    const id = '00000000-0000-4000-8000-00000000500d';
+    localStorage.setItem('motif.devAuth', JSON.stringify({ users: { 'demo@example.test': { id, password: 'x' } }, session: 'demo@example.test' }));
+    localStorage.setItem('motif.legacyAlbumMoved', '1');
+  }
   const params = new URLSearchParams(location.search);
   if (params.has('join')) {
     localStorage.setItem(PENDING_JOIN, params.get('join'));

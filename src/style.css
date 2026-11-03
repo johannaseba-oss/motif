@@ -426,3 +426,24 @@ span.cam-side { width: 48px; }
 
 .backup-state { margin: 22px 0 0; font-size: 14px; line-height: 1.35; text-align: center; flex: none; }
 .backup-state + .account-mail { margin-top: 6px; }
+
+/* ---------- Filter ---------- */
+
+.vf-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.camera.gl .vf-frame video { opacity: 0; }
+.camera:not(.gl) .vf-canvas { display: none; }
+.filter-row { display: flex; justify-content: center; gap: 4px; flex: none; padding-top: 16px; }
+.filter-row button {
+  min-height: 36px;
+  padding: 0 12px;
+  background: transparent;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--soft);
+}
+.filter-row button.on { color: var(--ink); font-weight: 900; }
+.zoom-row { padding-top: 6px; }
+
+.detail-actions { display: flex; gap: 10px; margin-top: 14px; }
+.detail-actions .delete-btn { flex: 1; justify-content: center; }
+.delete-btn span { white-space: nowrap; }

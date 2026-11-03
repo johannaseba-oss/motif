@@ -151,34 +151,7 @@ export class Album {
     g.fillRect(side === 'r' ? 0 : pw - gw, 0, gw, ph);
 
     if (page != null) {
-      const title = store.getPageTitle(page);
-      const { padX, headH, titleSize } = this.grid;
-      g.font = `900 ${titleSize}px Rubik, system-ui, sans-serif`;
-      g.fillStyle = title ? INK : '#c8c8c8';
-      g.textAlign = 'left';
-      g.textBaseline = 'middle';
-      const sharedInfo = store.sharedPage(page);
-      const titleText = title || (sharedInfo ? 'Gemeinsame Seite' : 'Seite benennen');
-      g.fillText(titleText, padX, headH * 0.58, pw - 2 * padX - SHARE_R * 2 - 8);
-      g.textBaseline = 'alphabetic';
-
-      // Teilen-Knopf: gefüllt, wenn die Seite gemeinsam ist
-      const cx = pw - padX - SHARE_R, cy = headH * 0.58;
-      g.save();
-      g.beginPath();
-      g.arc(cx, cy, SHARE_R - 1, 0, Math.PI * 2);
-      g.lineWidth = 1.6;
-      g.strokeStyle = INK;
-      g.fillStyle = sharedInfo ? INK : '#fff';
-      g.fill();
-      g.stroke();
-      g.translate(cx - 9, cy - 9);
-      g.scale(0.75, 0.75);
-      g.lineWidth = 2;
-      g.lineCap = 'round';
-      g.strokeStyle = sharedInfo ? '#fff' : INK;
-      g.stroke(PEOPLE);
-      g.restore();
+      if (!this.plain) this.drawHeader(g, page);
 
       for (let cell = 0; cell < PER_PAGE; cell++) {
         const slot = page * PER_PAGE + cell;
@@ -203,6 +176,39 @@ export class Album {
       g.textAlign = 'center';
       g.fillText(String(page + 1), pw / 2, ph - Math.max(14, ph * 0.026));
     }
+    g.restore();
+  }
+
+  // Titel und Teilen-Knopf oben auf der Seite
+  drawHeader(g, page) {
+    const { pw } = this;
+    const title = store.getPageTitle(page);
+    const { padX, headH, titleSize } = this.grid;
+    g.font = `900 ${titleSize}px Rubik, system-ui, sans-serif`;
+    g.fillStyle = title ? INK : '#c8c8c8';
+    g.textAlign = 'left';
+    g.textBaseline = 'middle';
+    const sharedInfo = store.sharedPage(page);
+    const titleText = title || (sharedInfo ? 'Gemeinsame Seite' : 'Seite benennen');
+    g.fillText(titleText, padX, headH * 0.58, pw - 2 * padX - SHARE_R * 2 - 8);
+    g.textBaseline = 'alphabetic';
+
+    // Teilen-Knopf: gefüllt, wenn die Seite gemeinsam ist
+    const cx = pw - padX - SHARE_R, cy = headH * 0.58;
+    g.save();
+    g.beginPath();
+    g.arc(cx, cy, SHARE_R - 1, 0, Math.PI * 2);
+    g.lineWidth = 1.6;
+    g.strokeStyle = INK;
+    g.fillStyle = sharedInfo ? INK : '#fff';
+    g.fill();
+    g.stroke();
+    g.translate(cx - 9, cy - 9);
+    g.scale(0.75, 0.75);
+    g.lineWidth = 2;
+    g.lineCap = 'round';
+    g.strokeStyle = sharedInfo ? '#fff' : INK;
+    g.stroke(PEOPLE);
     g.restore();
   }
 
