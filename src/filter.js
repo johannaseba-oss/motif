@@ -3,7 +3,8 @@ import { STAMP_ASPECT } from './stamp.js';
 
 export const FILTERS = [
   { id: 'original', label: 'Original' },
-  { id: 'retro', label: 'Retro' },
+  { id: 'retro', label: 'Retro leicht' },
+  { id: 'retro2', label: 'Retro stark' },
   { id: 'sw', label: 'S/W' },
 ];
 
@@ -31,16 +32,30 @@ float hash(vec2 q) {
   return fract(sin(dot(q, vec2(12.9898, 78.233)) + seed) * 43758.5453);
 }
 
+// Retro: wärmer, etwas mehr Kontrast, dunklere Tiefen, feines Korn.
+// Stark: Tiefen noch dunkler, Lichter gedämpft, ein Hauch Grün in den Schatten.
+vec3 retro(vec3 c, bool strong) {
+  c = c * vec3(1.04, 1.0, 0.92) + vec3(0.012, 0.005, 0.0);
+  c = (c - 0.5) * 1.12 + 0.5;
+  float l = dot(clamp(c, 0.0, 1.0), LUMA);
+  if (strong) {
+    float shadow = 1.0 - smoothstep(0.0, 0.5, l);
+    c *= mix(0.74, 1.0, smoothstep(0.0, 0.55, l));
+    c *= mix(1.0, 0.93, smoothstep(0.6, 1.0, l));
+    c += vec3(-0.004, 0.012, 0.0) * shadow;
+  } else {
+    c *= mix(0.84, 1.0, smoothstep(0.0, 0.5, l));
+  }
+  return c + (hash(gl_FragCoord.xy) - 0.5) * 0.035;
+}
+
 void main() {
   vec3 c = texture2D(tex, uv).rgb;
   if (mode == 1) {
-    // Retro: wärmer, etwas mehr Kontrast, dunklere Tiefen, feines Korn
-    c = c * vec3(1.04, 1.0, 0.92) + vec3(0.012, 0.005, 0.0);
-    c = (c - 0.5) * 1.12 + 0.5;
-    float l = dot(clamp(c, 0.0, 1.0), LUMA);
-    c *= mix(0.84, 1.0, smoothstep(0.0, 0.5, l));
-    c += (hash(gl_FragCoord.xy) - 0.5) * 0.035;
+    c = retro(c, false);
   } else if (mode == 2) {
+    c = retro(c, true);
+  } else if (mode == 3) {
     // Schwarzweiß: mehr Kontrast, hellere Lichter
     float l = dot(c, LUMA);
     l = (l - 0.5) * 1.28 + 0.5;
