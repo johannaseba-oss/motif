@@ -13,7 +13,8 @@ import * as cloud from './cloud.js';
 import * as social from './profile-page.js';
 import { icons } from './icons.js';
 import { tick } from './haptics.js';
-import { THEMES, THEME_FIRST, themeOf } from './themes.js';
+import { COVER_COLORS, THEME_ALBUM, themeOf } from './themes.js';
+import * as challenges from './challenges.js';
 
 const app = document.getElementById('app');
 document.documentElement.style.setProperty('--stamp-clip', clipPathCss);
@@ -125,6 +126,7 @@ async function enterApp() {
   await sync.init();
   await cloud.init();
   await social.init();
+  await challenges.init();
   profile = await store.getProfile();
   // Name kommt aus dem Konto, damit ein neuer Browser nicht wieder nach dem Profil fragt
   const accountName = auth.accountName();
@@ -320,8 +322,6 @@ function showShelf() {
   app.querySelector('.shelf')?.remove();
   const el = document.createElement('div');
   el.className = 'shelf screen';
-  const privateCount = store.stamps.filter(s => s.slot < THEME_FIRST * store.PER_PAGE).length;
-  const themeCount = store.stamps.filter(s => s.slot >= THEME_FIRST * store.PER_PAGE).length;
   el.innerHTML = `
     <header class="top">
       <h1>MOTIF</h1>
@@ -329,20 +329,39 @@ function showShelf() {
     </header>
     <div class="covers">
       <button class="cover" data-kind="theme">
-        <span class="cover-dots">${THEMES.filter(t => t.color).map(t => `<i style="background:${t.color}"></i>`).join('')}</span>
-        <b>Themen</b>
-        <small>${THEMES.length} Seiten · ${markenText(themeCount)}</small>
+        <span class="cover-dots">${COVER_COLORS.map(c => `<i style="background:${c}"></i>`).join('')}</span>
+        <b>${THEME_ALBUM.replace("walks", "&shy;walks")}</b>
       </button>
       <button class="cover" data-kind="private">
         <span class="cover-stamp stamp-clip"></span>
         <b>Mein Album</b>
-        <small>${markenText(privateCount)}</small>
       </button>
-    </div>`;
+    </div>
+    <section class="challenges"></section>`;
   app.prepend(el);
   el.querySelectorAll('.cover').forEach(b => b.addEventListener('click', () => showAlbum(b.dataset.kind)));
   el.querySelector('.profile-btn').addEventListener('click', openOwnProfile);
+  challenges.renderSection(el.querySelector('.challenges'), { toast, confirm: confirmSheet, takePhoto: takeChallengePhoto });
   startSharing();
+}
+
+// Foto für eine Challenge: landet auch in "Mein Album" und wird vor dem Einreichen ins Konto gesichert
+function takeChallengePhoto() {
+  return new Promise(resolve => {
+    let stamp = null;
+    openCamera({
+      onShot: async (cut, { finish }) => {
+        stamp = await store.addStamp(cut);
+        await finish();
+      },
+      onClose: async () => {
+        if (!stamp) { resolve(null); return; }
+        await cloud.ensureSynced(stamp);
+        if (!stamp.synced) toast('Das Foto liegt in deinem Album, ließ sich aber noch nicht hochladen. Bist du online?');
+        resolve(stamp.synced ? stamp : null);
+      },
+    });
+  });
 }
 
 function showAlbum(kind = albumKind || 'private') {
@@ -354,7 +373,7 @@ function showAlbum(kind = albumKind || 'private') {
   el.innerHTML = `
     <header class="top">
       <button class="round back-btn" aria-label="Zur Albumwahl">${icons.back}</button>
-      <h1>${kind === 'theme' ? 'Themen' : 'Mein Album'}</h1>
+      <h1>${kind === 'theme' ? THEME_ALBUM : 'Mein Album'}</h1>
       <button class="profile-btn" aria-label="Profil von ${escapeHtml(profile.name)}">${avatarHtml()}</button>
     </header>
     <main class="stage"></main>
@@ -383,10 +402,7 @@ function openOwnProfile() {
     // Für die Auswahl im Profil: nur eigene Marken aus dem privaten Album, neueste zuerst
     ownStamps: () => store.stamps.filter(s => !s.shared).sort((a, b) => b.createdAt - a.createdAt),
     thumbUrl: s => album?.images.get(s.id)?.src || URL.createObjectURL(s.thumb),
-    ensureSynced: async s => {
-      if (!s.synced) await cloud.syncAll();
-      return !!s.synced;
-    },
+    ensureSynced: s => cloud.ensureSynced(s),
   });
 }
 
@@ -685,8 +701,7 @@ async function openDetail(first, from) {
     featureBtn.disabled = true;
     try {
       // Erst ins Konto sichern, dann zeigen
-      if (!s.synced) await cloud.syncAll();
-      if (!s.synced) throw new Error('not synced');
+      if (!(await cloud.ensureSynced(s))) throw new Error('not synced');
       await social.setFeatured(s.id, !social.isFeatured(s.id));
       tick();
     } catch {

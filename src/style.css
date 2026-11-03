@@ -595,3 +595,113 @@ span.cam-side { width: 48px; }
 .home .top { gap: 12px; }
 .home .top h1 { flex: 1; font-size: 30px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .back-btn { flex: none; width: 44px; height: 44px; }
+
+/* ---------- Startbildschirm: Alben oben, Challenges darunter ---------- */
+
+.shelf { overflow-y: auto; }
+.shelf .covers { flex: none; align-content: start; padding-top: 18px; }
+.cover { justify-content: space-between; }
+.cover b { margin-top: auto; }
+.challenges { width: 100%; max-width: 560px; margin: 36px auto 0; padding: 0 6px; }
+.challenges h2 { margin: 0 0 14px; font-weight: 900; font-size: 24px; }
+.ch-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
+.ch-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  min-height: 64px;
+  padding: 10px 16px 10px 12px;
+  text-align: left;
+  border: var(--line) solid var(--ink);
+  border-radius: 18px;
+  box-shadow: 4px 5px 0 var(--ink);
+  transition: transform .08s, box-shadow .08s;
+}
+.ch-row:active { transform: translate(4px, 5px); box-shadow: 0 0 0 var(--ink); }
+.ch-row.locked { border-color: #c4c4c4; box-shadow: 4px 5px 0 #d8d8d8; color: #9a9a9a; }
+.ch-num {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--ink);
+  color: var(--paper);
+  font-weight: 900;
+  font-size: 16px;
+}
+.ch-row.locked .ch-num { background: #d0d0d0; }
+.ch-row.done .ch-num { background: var(--paper); color: var(--ink); border: var(--line) solid var(--ink); }
+.ch-text { flex: 1; min-width: 0; }
+.ch-text b { display: block; font-weight: 900; font-size: 16px; line-height: 1.2; }
+.ch-text small { display: block; margin-top: 3px; font-size: 13px; color: var(--soft); }
+.ch-icon { flex: none; }
+.ch-icon svg { width: 20px; height: 20px; }
+.ch-invite { margin-bottom: 14px; padding: 16px; border: var(--line) solid var(--ink); border-radius: 18px; background: var(--paper); box-shadow: 4px 5px 0 var(--ink); }
+.ch-invite p { margin: 0 0 12px; font-size: 15px; line-height: 1.35; }
+.ch-invite div { display: flex; align-items: center; gap: 8px; }
+.ch-invite .pill { height: 44px; width: auto; padding: 0 20px; font-size: 15px; }
+
+.invite h1, .challenge h1 { font-size: 28px; line-height: 1.1; overflow-wrap: anywhere; }
+.invite-rule { margin: 8px 0 0; font-size: 15px; color: var(--soft); }
+.invite-picked { display: flex; flex-wrap: wrap; gap: 8px; list-style: none; margin: 16px 0 0; padding: 0; }
+.invite-picked:empty { display: none; }
+.chip { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 10px 0 14px; border: var(--line) solid var(--ink); border-radius: 18px; font-size: 14px; font-weight: 500; }
+.chip svg { width: 16px; height: 16px; }
+.invite .field { max-width: none; }
+.invite .primary { margin-top: 22px; max-width: none; }
+.ch-kicker { margin: 4px 0 6px; font-size: 14px; font-weight: 500; color: var(--soft); }
+.ch-state { margin: 10px 0 0; font-size: 15px; line-height: 1.4; }
+.ch-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px 16px; margin-top: 26px; }
+.ch-cell { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 0; text-align: center; }
+.ch-cell b { max-width: 100%; font-weight: 500; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ch-cell small { min-height: 1em; font-size: 12px; color: var(--soft); }
+.ch-stamp { width: 100%; aspect-ratio: .7438; background: transparent; }
+.ch-cell:not(.in) .ch-stamp { background: #e9e9e9; clip-path: var(--stamp-clip); }
+.ch-cell.in .ch-stamp { filter: drop-shadow(3px 4px 0 var(--ink)); }
+.ch-stamp img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.ch-actions { display: flex; flex-direction: column; align-items: center; gap: 6px; margin-top: 30px; }
+.ch-actions .pill { max-width: none; }
+.cover b { font-size: min(24px, 6vw); hyphens: manual; overflow-wrap: anywhere; }
+
+/* ---------- Gemeinsames Challenge-Fenster ---------- */
+
+.challenges h2 { margin: 0; }
+.ch-card {
+  padding: 22px 20px 20px;
+  background: var(--ink);
+  color: var(--paper);
+  border-radius: 22px;
+  box-shadow: 6px 7px 0 #bdbdbd;
+}
+.ch-eyebrow { margin: 0 0 8px; font-size: 13px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; color: #b8b8b8; }
+.ch-card h2 { font-weight: 900; font-size: 28px; line-height: 1.08; overflow-wrap: anywhere; }
+.ch-lead { margin: 10px 0 0; font-size: 15px; line-height: 1.4; color: #e6e6e6; }
+.ch-steps { display: flex; gap: 10px; list-style: none; margin: 20px 0 0; padding: 0; }
+.ch-step { flex: 0 1 44px; }
+.ch-step > span, .ch-step > button {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  aspect-ratio: .7438;
+  padding: 0;
+  font-weight: 900;
+  font-size: 16px;
+}
+.ch-step svg { width: 18px; height: 18px; stroke-width: 2.6; }
+.ch-card .ch-step.done > span { background: var(--paper); color: var(--ink); }
+.ch-card .ch-step.now > span { background: var(--paper); color: var(--ink); outline: 3px solid var(--paper); }
+.ch-card .ch-step.now { transform: translateY(-4px); }
+.ch-card .ch-step.later > span { background: #3a3a3a; color: #7a7a7a; }
+.ch-cta { display: flex; align-items: center; gap: 12px; margin-top: 22px; }
+.ch-go { flex: 1; max-width: none; height: 52px; background: var(--paper); color: var(--ink); border-color: var(--paper); box-shadow: 4px 5px 0 #7a7a7a; }
+.ch-go:active { box-shadow: 0 0 0 #7a7a7a; }
+.ch-no { color: var(--paper); }
+
+.ch-tabs { margin: 0 0 18px; }
+.ch-tabs .ch-step > button { background: #ececec; color: var(--ink); }
+.ch-tabs .ch-step.now > button { background: var(--ink); color: var(--paper); }
+.ch-tabs .ch-step.done > button, .ch-tabs .ch-step.free > button { background: #d6d6d6; }
+.ch-tabs .ch-step.later > button { background: #f3f3f3; color: #c4c4c4; }

@@ -46,7 +46,7 @@ async function getStream(facing) {
  * onShot(cut, shot) wird nach der Aufnahme aufgerufen, danach schließt sich die Kamera.
  * shot enthält das Foto als Rechteck, seine Lage im Sucher und finish() zum Ausblenden.
  */
-export function openCamera({ facing = 'environment', onShot }) {
+export function openCamera({ facing = 'environment', onShot, onClose }) {
   const el = document.createElement('div');
   el.className = 'camera screen';
   el.innerHTML = `
@@ -272,6 +272,7 @@ export function openCamera({ facing = 'environment', onShot }) {
     closed = true;
     stream?.getTracks().forEach(t => t.stop());
     el.remove();
+    onClose?.();
   }
 
   // Blendet die Kamera aus, die Stanz-Animation läuft darüber weiter

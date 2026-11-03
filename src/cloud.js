@@ -173,3 +173,12 @@ export async function syncAll(isBusy = () => false) {
 
 export let trigger = () => {};
 export const setTrigger = f => { trigger = f; };
+
+// Wartet, bis eine bestimmte Marke im Konto liegt; läuft gerade ein Abgleich, wird erneut versucht
+export async function ensureSynced(stamp, tries = 12) {
+  for (let i = 0; i < tries && !stamp.synced; i++) {
+    await syncAll().catch(() => {});
+    if (!stamp.synced) await new Promise(r => setTimeout(r, 500));
+  }
+  return !!stamp.synced;
+}

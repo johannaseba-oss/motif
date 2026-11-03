@@ -7,6 +7,8 @@ export const icons = {
   close: svg('<path d="M6 6l12 12M18 6L6 18"/>'),
   export: svg('<path d="M12 15V4"/><path d="M8 7.5l4-4 4 4"/><path d="M6 11v8.5h12V11"/>'),
   back: svg('<path d="M15 5l-7 7 7 7"/>'),
+  lock: svg('<rect x="5.5" y="10.5" width="13" height="9.5" rx="1.5"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/>'),
+  next: svg('<path d="M9 5l7 7-7 7"/>'),
   plus: svg('<path d="M12 5v14M5 12h14"/>'),
   check: svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>'),
   search: svg('<circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/>'),

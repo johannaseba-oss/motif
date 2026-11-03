@@ -40,13 +40,13 @@ async function avatarUrl(uid) {
 }
 export const dropAvatarCache = uid => avatars.delete(uid);
 
-function avatarEl(cls) {
+export function avatarEl(cls) {
   const wrap = document.createElement('div');
   wrap.className = cls;
   wrap.innerHTML = `<span class="avatar-empty stamp-clip">${icons.person}</span>`;
   return wrap;
 }
-async function fillAvatar(wrap, uid) {
+export async function fillAvatar(wrap, uid) {
   const url = await avatarUrl(uid);
   if (url && wrap.isConnected) wrap.innerHTML = `<img src="${url}" alt="">`;
 }
