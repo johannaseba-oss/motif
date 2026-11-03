@@ -1,8 +1,8 @@
 import { cropPhoto, cutStamp, FULL_W, STAMP_ASPECT } from './stamp.js';
-import { FILTERS, FilterRenderer } from './filter.js';
+import { FILTERS, FilterRenderer, knownFilter } from './filter.js';
 
 const FILTER_KEY = 'motif.filter';
-const loadFilter = () => { try { return localStorage.getItem(FILTER_KEY) || 'original'; } catch { return 'original'; } };
+const loadFilter = () => { try { return knownFilter(localStorage.getItem(FILTER_KEY)); } catch { return 'original'; } };
 const saveFilter = id => { try { localStorage.setItem(FILTER_KEY, id); } catch {} };
 import { icons } from './icons.js';
 import { tick } from './haptics.js';

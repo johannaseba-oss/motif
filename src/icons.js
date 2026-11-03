@@ -6,5 +6,6 @@ export const icons = {
   flip: svg('<path d="M4 11a8 8 0 0 1 13.700-4.700L20 8.500"/><path d="M20 4v4.500h-4.500"/><path d="M20 13a8 8 0 0 1-13.700 4.700L4 15.500"/><path d="M4 20v-4.500h4.500"/>'),
   close: svg('<path d="M6 6l12 12M18 6L6 18"/>'),
   export: svg('<path d="M12 15V4"/><path d="M8 7.5l4-4 4 4"/><path d="M6 11v8.5h12V11"/>'),
+  search: svg('<circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/>'),
   trash: svg('<path d="M4.500 7h15"/><path d="M9.500 7V4.500h5V7"/><path d="M6.500 7l1 12.500h9l1-12.500"/>'),
 };

@@ -10,6 +10,7 @@ import { punchOut, pinToAlbum } from './punch.js';
 import * as auth from './auth.js';
 import * as sync from './sync.js';
 import * as cloud from './cloud.js';
+import * as social from './profile-page.js';
 import { icons } from './icons.js';
 import { tick } from './haptics.js';
 
@@ -121,6 +122,7 @@ async function enterApp() {
   await store.open(auth.user.id);
   await sync.init();
   await cloud.init();
+  await social.init();
   profile = await store.getProfile();
   // Name kommt aus dem Konto, damit ein neuer Browser nicht wieder nach dem Profil fragt
   const accountName = auth.accountName();
@@ -164,7 +166,7 @@ function devShot(mode) {
 
 /* ---------- Profil anlegen und bearbeiten ---------- */
 
-function profileForm({ first }) {
+function profileForm({ first, onSaved }) {
   const el = document.createElement('div');
   el.className = 'profile screen' + (first ? ' first' : '');
   let draftAvatar = profile?.avatar || null;
@@ -182,13 +184,51 @@ function profileForm({ first }) {
       <span>Name</span>
       <input name="name" autocomplete="name" maxlength="30" placeholder="Wie heißt du?" value="">
     </label>
+    ${first ? '' : `<label class="field"><span>@Name</span>
+      <input name="username" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="20" placeholder="nur a–z, 0–9, Punkt und _"></label>
+    <label class="field"><span>Über mich</span>
+      <textarea name="bio" rows="3" maxlength="160" placeholder="Ein paar Worte über dich"></textarea></label>
+    <div class="field"><span>Wer sieht dein Profil?</span><div class="segmented" role="radiogroup"></div></div>
+    <p class="form-msg" role="status" hidden></p>`}
     ${first ? '' : `<div class="stats"><div><b>${store.stamps.length}</b><span>${store.stamps.length === 1 ? 'Marke' : 'Marken'}</span></div><div><b>${pages}</b><span>${pages === 1 ? 'Seite' : 'Seiten'}</span></div><div class="since"><b>${fmtDate(profile.createdAt)}</b><span>dabei seit</span></div></div>`}
     <button class="pill primary" data-a="save">${first ? 'Album öffnen' : 'Speichern'}</button>
     ${first ? '' : `<p class="backup-state" role="status"></p><p class="account-mail"></p><button class="text-btn" data-a="logout">Abmelden</button>`}`;
   app.append(el);
 
-  const input = el.querySelector('input');
+  const input = el.querySelector('input[name=name]');
   input.value = profile?.name || '';
+
+  // Öffentliches Profil: @Name, Bio, Sichtbarkeit
+  const userInput = el.querySelector('[name=username]');
+  const bioInput = el.querySelector('[name=bio]');
+  const seg = el.querySelector('.segmented');
+  const msg = el.querySelector('.form-msg');
+  let visibility = 'private';
+  let socialBefore = null;
+  const paintSeg = () => seg?.querySelectorAll('button').forEach(b => {
+    b.classList.toggle('on', b.dataset.v === visibility);
+    b.setAttribute('aria-checked', b.dataset.v === visibility);
+  });
+  if (seg) {
+    for (const v of social.VISIBILITY) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.dataset.v = v.id;
+      b.textContent = v.label;
+      b.setAttribute('role', 'radio');
+      b.addEventListener('click', () => { visibility = v.id; paintSeg(); });
+      seg.append(b);
+    }
+    paintSeg();
+    social.api.getProfile(auth.user.id).then(p => {
+      if (!p || !el.isConnected) return;
+      socialBefore = p;
+      userInput.value = p.username;
+      bioInput.value = p.bio;
+      visibility = p.visibility;
+      paintSeg();
+    }).catch(() => {});
+  }
   const pick = el.querySelector('.avatar-pick');
   const save = el.querySelector('[data-a=save]');
   const paint = () => {
@@ -235,6 +275,20 @@ function profileForm({ first }) {
   save.addEventListener('click', async () => {
     const name = input.value.trim();
     if (!name) return;
+    if (userInput) {
+      const username = userInput.value.trim().replace(/^@/, '').toLowerCase();
+      const fail = text => { msg.hidden = false; msg.classList.add('error'); msg.textContent = text; };
+      if (username || socialBefore) {
+        if (!/^[a-z0-9._]{3,20}$/.test(username)) return fail('Der @Name braucht 3 bis 20 Zeichen: a–z, 0–9, Punkt oder _.');
+        try {
+          await social.api.saveProfile({ username, display_name: name, bio: bioInput.value.trim(), visibility });
+          if (visibility === 'public' && socialBefore?.visibility !== 'public') await social.api.acceptAll();
+        } catch (e) {
+          return fail(e?.code === '23505' ? 'Diesen @Namen gibt es schon.' : 'Speichern hat nicht geklappt. Bist du online?');
+        }
+      }
+      social.dropAvatarCache(auth.user.id);
+    }
     profile = {
       ...profile, name, avatar: draftAvatar, createdAt: profile?.createdAt || Date.now(),
       avatarDirty: profile?.avatarDirty || (!!draftAvatar && draftAvatar !== profile?.avatar),
@@ -245,6 +299,7 @@ function profileForm({ first }) {
     setAvatarUrl();
     close();
     showAlbum();
+    onSaved?.();
   });
   if (first) setTimeout(() => input.focus(), 50);
 }
@@ -273,7 +328,10 @@ function showAlbum() {
   });
   album.canEditSharedTitle = info => info.owner === auth.user.id;
   startSharing();
-  el.querySelector('.profile-btn').addEventListener('click', () => profileForm({ first: false }));
+  el.querySelector('.profile-btn').addEventListener('click', () => social.openProfilePage(auth.user.id, {
+    toast,
+    onEdit: refresh => profileForm({ first: false, onSaved: refresh }),
+  }));
   el.querySelector('.shoot').addEventListener('click', showCamera);
 }
 
@@ -467,7 +525,7 @@ function openShareSheet(page) {
 
 /* ---------- Große Ansicht ---------- */
 
-async function openDetail(stamp, from) {
+async function openDetail(first, from) {
   const el = document.createElement('div');
   el.className = 'detail screen';
   el.innerHTML = `
@@ -478,10 +536,11 @@ async function openDetail(stamp, from) {
       <textarea class="stamp-desc" rows="2" maxlength="500" placeholder="Beschreibung" aria-label="Beschreibung der Marke"></textarea>
       <div class="detail-row">
         <div>
-          <b>${fmtDate(stamp.createdAt)}</b>
+          <b class="detail-date"></b>
           <span class="detail-meta"></span>
         </div>
       </div>
+      <button class="pill feature-btn" data-a="feature"></button>
       <div class="detail-actions">
         <button class="delete-btn" data-a="export">${icons.export}<span>Exportieren</span></button>
         <button class="delete-btn" data-a="delete" aria-label="Marke löschen">${icons.trash}<span>Löschen</span></button>
@@ -494,22 +553,21 @@ async function openDetail(stamp, from) {
   const wrap = el.querySelector('.detail-stamp');
   const nameInput = el.querySelector('.stamp-name');
   const descInput = el.querySelector('.stamp-desc');
-  nameInput.value = stamp.name || '';
-  descInput.value = stamp.desc || '';
-  el.querySelector('.detail-meta').textContent = stamp.shared
-    ? `von ${stamp.shared.ownerName || 'jemandem'}`
-    : `Seite ${Math.floor(stamp.slot / store.PER_PAGE) + 1}`;
-  if (!sync.isMine(stamp)) {
-    nameInput.readOnly = descInput.readOnly = true;
-    nameInput.hidden = !stamp.name;
-    descInput.hidden = !stamp.desc;
-  }
-  if (!sync.canDelete(stamp)) el.querySelector('[data-a=delete]').hidden = true;
+  const del = el.querySelector('[data-a=delete]');
+  const featureBtn = el.querySelector('[data-a=feature]');
+  let stamp = null;
+  let fullUrl = null;
   let saveTimer = 0;
+  let armed = false;
+
+  // Alle Marken der Seite, auf der die gerade gezeigte liegt, in Album-Reihenfolge
+  const pageOf = s => Math.floor(s.slot / store.PER_PAGE);
+  const siblings = () => store.stamps.filter(s => pageOf(s) === pageOf(stamp)).sort((a, b) => a.slot - b.slot);
+
   const saveText = () => {
     clearTimeout(saveTimer);
+    if (!stamp || !sync.isMine(stamp)) return;
     const name = nameInput.value.trim(), desc = descInput.value.trim();
-    if (!sync.isMine(stamp)) return;
     if (name !== (stamp.name || '') || desc !== (stamp.desc || '')) {
       Promise.resolve(store.updateStamp(stamp, { name, desc })).catch(() => toast('Speichern hat nicht geklappt.'));
     }
@@ -518,15 +576,64 @@ async function openDetail(stamp, from) {
     field.addEventListener('input', () => { clearTimeout(saveTimer); saveTimer = setTimeout(saveText, 400); });
     field.addEventListener('blur', saveText);
   }
-  img.src = album.images.get(stamp.id)?.src || URL.createObjectURL(stamp.thumb);
-  let fullUrl = null;
-  store.getFull(stamp.id).then(b => {
-    if (!b || !el.isConnected) return;
-    fullUrl = URL.createObjectURL(b);
-    const hi = new Image();
-    hi.onload = () => { if (el.isConnected) img.src = fullUrl; };
-    hi.src = fullUrl;
-  }).catch(() => {});
+
+  function resetDelete() {
+    armed = false;
+    del.classList.remove('armed');
+    del.innerHTML = `${icons.trash}<span>Löschen</span>`;
+  }
+
+  function show(s) {
+    saveText();
+    stamp = s;
+    resetDelete();
+    const mine = sync.isMine(s);
+    nameInput.value = s.name || '';
+    descInput.value = s.desc || '';
+    nameInput.readOnly = descInput.readOnly = !mine;
+    nameInput.hidden = !mine && !s.name;
+    descInput.hidden = !mine && !s.desc;
+    del.hidden = !sync.canDelete(s);
+    featureBtn.hidden = !!s.shared;
+    paintFeature();
+    el.querySelector('.detail-date').textContent = fmtDate(s.createdAt);
+    const list = siblings();
+    const where = s.shared ? `von ${s.shared.ownerName || 'jemandem'}` : `Seite ${pageOf(s) + 1}`;
+    el.querySelector('.detail-meta').textContent = list.length > 1 ? `${where} · ${list.indexOf(s) + 1} von ${list.length}` : where;
+
+    if (fullUrl) { URL.revokeObjectURL(fullUrl); fullUrl = null; }
+    img.src = album.images.get(s.id)?.src || URL.createObjectURL(s.thumb);
+    store.getFull(s.id).then(b => {
+      if (!b || !el.isConnected || stamp !== s) return;
+      fullUrl = URL.createObjectURL(b);
+      const hi = new Image();
+      hi.onload = () => { if (el.isConnected && stamp === s) img.src = fullUrl; };
+      hi.src = fullUrl;
+    }).catch(() => {});
+  }
+  function paintFeature() {
+    const on = social.isFeatured(stamp.id);
+    featureBtn.classList.toggle('on', on);
+    featureBtn.textContent = on ? 'Im Profil gezeigt' : 'Im Profil zeigen';
+  }
+  featureBtn.addEventListener('click', async () => {
+    if (tooSoon()) return;
+    const s = stamp;
+    featureBtn.disabled = true;
+    try {
+      // Erst ins Konto sichern, dann zeigen
+      if (!s.synced) await cloud.syncAll();
+      if (!s.synced) throw new Error('not synced');
+      await social.setFeatured(s.id, !social.isFeatured(s.id));
+      tick();
+    } catch {
+      toast('Das hat nicht geklappt. Bist du online?');
+    }
+    featureBtn.disabled = false;
+    if (stamp === s) paintFeature();
+  });
+
+  show(first);
 
   const zoomFrames = () => {
     const to = wrap.getBoundingClientRect();
@@ -558,9 +665,68 @@ async function openDetail(stamp, from) {
     el.remove();
   };
 
+  /* ---------- Wischen zur nächsten oder vorigen Marke der Seite ---------- */
+
+  let swipe = null, sliding = false, swiped = false;
+  const W = () => wrap.getBoundingClientRect().width;
+
+  async function slideTo(dir) {
+    const list = siblings();
+    const next = list[list.indexOf(stamp) + dir];
+    sliding = true;
+    if (!next) {
+      // Am Rand der Seite federt die Marke zurück
+      await wrap.animate([{ transform: wrap.style.transform || 'none' }, { transform: 'none' }], { duration: 220, easing: 'cubic-bezier(.2,.8,.2,1)' }).finished.catch(() => {});
+      wrap.style.transform = '';
+      sliding = false;
+      return;
+    }
+    tick();
+    const off = innerWidth * 0.75;
+    await wrap.animate([{ transform: wrap.style.transform || 'none', opacity: 1 }, { transform: `translateX(${-dir * off}px)`, opacity: 0 }],
+      { duration: 160, easing: 'ease-in', fill: 'forwards' }).finished.catch(() => {});
+    show(next);
+    wrap.getAnimations().forEach(a => a.cancel());
+    wrap.style.transform = '';
+    await wrap.animate([{ transform: `translateX(${dir * off}px)`, opacity: 0 }, { transform: 'none', opacity: 1 }],
+      { duration: 220, easing: 'cubic-bezier(.2,.8,.2,1)' }).finished.catch(() => {});
+    sliding = false;
+  }
+
+  wrap.addEventListener('pointerdown', e => {
+    if (sliding || closing) return;
+    swipe = { id: e.pointerId, x: e.clientX, y: e.clientY, t: e.timeStamp, dx: 0, active: false };
+    swiped = false;
+    try { wrap.setPointerCapture(e.pointerId); } catch {}
+  });
+  wrap.addEventListener('pointermove', e => {
+    if (!swipe || e.pointerId !== swipe.id) return;
+    const dx = e.clientX - swipe.x, dy = e.clientY - swipe.y;
+    if (!swipe.active && Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy)) swipe.active = true;
+    if (!swipe.active) return;
+    const list = siblings();
+    const i = list.indexOf(stamp);
+    const blocked = (dx > 0 && i === 0) || (dx < 0 && i === list.length - 1);
+    swipe.dx = dx;
+    wrap.style.transform = `translateX(${blocked ? dx * 0.3 : dx}px)`;
+  });
+  const endSwipe = e => {
+    if (!swipe || e.pointerId !== swipe.id) return;
+    const { active, dx, t } = swipe;
+    swipe = null;
+    if (!active) return;
+    swiped = true;
+    const fast = Math.abs(dx) / Math.max(1, e.timeStamp - t) > 0.5;
+    if (Math.abs(dx) > W() * 0.25 || (fast && Math.abs(dx) > 30)) slideTo(dx < 0 ? 1 : -1);
+    else slideTo(0);
+  };
+  wrap.addEventListener('pointerup', endSwipe);
+  wrap.addEventListener('pointercancel', endSwipe);
+
   el.querySelector('.detail-close').addEventListener('click', close);
   el.querySelector('.detail-bg').addEventListener('click', close);
-  wrap.addEventListener('click', close);
+  // Antippen schließt, Wischen nicht
+  wrap.addEventListener('click', () => { if (!swiped && !sliding) close(); swiped = false; });
 
   el.querySelector('[data-a=export]').addEventListener('click', async () => {
     if (tooSoon()) return;
@@ -572,8 +738,6 @@ async function openDetail(stamp, from) {
     }
   });
 
-  const del = el.querySelector('[data-a=delete]');
-  let armed = false;
   del.addEventListener('click', async () => {
     if (tooSoon()) return;
     if (!armed) {
@@ -581,24 +745,31 @@ async function openDetail(stamp, from) {
       tick();
       del.classList.add('armed');
       del.innerHTML = 'Wirklich löschen?';
-      setTimeout(() => {
-        if (!del.isConnected) return;
-        armed = false;
-        del.classList.remove('armed');
-        del.innerHTML = `${icons.trash}<span>Löschen</span>`;
-      }, 3000);
+      const shownAt = stamp;
+      setTimeout(() => { if (del.isConnected && stamp === shownAt && armed) resetDelete(); }, 3000);
       return;
     }
     clearTimeout(saveTimer);
+    const gone = stamp;
+    const list = siblings();
+    const next = list[list.indexOf(gone) + 1] || list[list.indexOf(gone) - 1];
     try {
-      await store.deleteStamp(stamp);
+      await store.deleteStamp(gone);
     } catch {
       toast('Löschen hat nicht geklappt. Bist du online?');
       return;
     }
-    album.forget(stamp.id);
+    album.forget(gone.id);
+    social.forgetFeatured(gone.id);
     album.clampCur();
     album.render();
+    // Weitere Marken auf der Seite: die nächste zeigen, sonst zurück ins Album
+    if (next) {
+      stamp = null;
+      show(next);
+      wrap.animate([{ opacity: 0, transform: 'scale(.96)' }, { opacity: 1, transform: 'none' }], { duration: 200, easing: 'ease-out' });
+      return;
+    }
     if (fullUrl) URL.revokeObjectURL(fullUrl);
     el.remove();
   });
