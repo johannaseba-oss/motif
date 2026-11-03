@@ -1,5 +1,6 @@
 import { STAMP_ASPECT, stampPath } from './stamp.js';
 import * as store from './store.js';
+import { THEME_FIRST, THEMES, themeOf } from './themes.js';
 import { tick } from './haptics.js';
 
 const { PER_PAGE } = store;
@@ -16,13 +17,16 @@ const SHARE_R = 15;
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
 export class Album {
-  constructor(stage, { onOpen, onShare, canMove, confirmShareDrop }) {
+  constructor(stage, { onOpen, onShare, canMove, confirmShareDrop, theme = false }) {
+    // Themenalbum: zehn feste Seiten ab THEME_FIRST, Titel vorgegeben, nicht teilbar
+    this.theme = theme;
+    this.base = theme ? THEME_FIRST : 0;
     this.stage = stage;
     this.onOpen = onOpen;
     this.onShare = onShare;
     this.canMove = canMove;
     this.confirmShareDrop = confirmShareDrop;
-    this.cur = 0;           // aktuelle Seite (Doppelseite: immer die linke, also gerade)
+    this.cur = this.base;   // aktuelle Seite (Doppelseite: immer die linke, also gerade)
     this.spread = false;
     this.pw = this.ph = 0;
     this.images = new Map(); // id -> HTMLImageElement
@@ -56,7 +60,7 @@ export class Album {
 
   /* ---------- Maße ---------- */
 
-  get pageCount() { return Math.max(2, store.usedPages() + 1); }
+  get pageCount() { return this.theme ? this.base + THEMES.length : Math.max(2, store.usedPages() + 1); }
   get step() { return this.spread ? 2 : 1; }
 
   layout() {
@@ -151,7 +155,8 @@ export class Album {
     g.fillRect(side === 'r' ? 0 : pw - gw, 0, gw, ph);
 
     if (page != null) {
-      if (!this.plain) this.drawHeader(g, page);
+      if (this.theme) this.drawThemeHeader(g, page);
+      else if (!this.plain) this.drawHeader(g, page);
 
       for (let cell = 0; cell < PER_PAGE; cell++) {
         const slot = page * PER_PAGE + cell;
@@ -174,9 +179,35 @@ export class Album {
       g.fillStyle = '#8a8a8a';
       g.font = `500 ${Math.max(11, pw * 0.032)}px Rubik, system-ui, sans-serif`;
       g.textAlign = 'center';
-      g.fillText(String(page + 1), pw / 2, ph - Math.max(14, ph * 0.026));
+      g.fillText(String(page - this.base + 1), pw / 2, ph - Math.max(14, ph * 0.026));
     }
     g.restore();
+  }
+
+  // Vorgegebener Titel im Themenalbum, bei Colour Walks mit Farbpunkt
+  drawThemeHeader(g, page) {
+    const t = themeOf(page);
+    if (!t) return;
+    const { padX, headH, titleSize } = this.grid;
+    const cy = headH * 0.58;
+    let x = padX;
+    if (t.color) {
+      const r = titleSize * 0.36;
+      g.beginPath();
+      g.arc(x + r, cy, r, 0, Math.PI * 2);
+      g.fillStyle = t.color;
+      g.fill();
+      g.lineWidth = 1.5;
+      g.strokeStyle = INK;
+      g.stroke();
+      x += r * 2 + titleSize * 0.4;
+    }
+    g.font = `900 ${titleSize}px Rubik, system-ui, sans-serif`;
+    g.fillStyle = INK;
+    g.textAlign = 'left';
+    g.textBaseline = 'middle';
+    g.fillText(t.title, x, cy, this.pw - x - padX);
+    g.textBaseline = 'alphabetic';
   }
 
   // Titel und Teilen-Knopf oben auf der Seite
@@ -278,6 +309,7 @@ export class Album {
   }
 
   clampCur() {
+    if (this.cur < this.base) this.cur = this.base;
     const max = this.pageCount - 1;
     if (this.cur > max) this.cur = this.spread ? max - (max % 2) : max;
   }
@@ -285,7 +317,7 @@ export class Album {
   /* ---------- Umblättern ---------- */
 
   canFlip(dir) {
-    return dir > 0 ? this.cur + this.step < this.pageCount : this.cur - this.step >= 0;
+    return dir > 0 ? this.cur + this.step < this.pageCount : this.cur - this.step >= this.base;
   }
 
   beginFlip(dir) {
@@ -487,12 +519,24 @@ export class Album {
     const head = this.headAt(e.clientX, e.clientY);
     if (!head) return;
     if (head.share) { this.onShare?.(head.page); return; }
+    if (this.theme) return;
     const info = store.sharedPage(head.page);
     if (!info || this.canEditSharedTitle?.(info)) this.editTitle(head.page);
   }
 
   // Die aktuell sichtbare gemeinsame Seite mit freiem Platz, dorthin geht dann eine neue Aufnahme
+  // Erster freier Platz auf einer gerade sichtbaren Seite, für Aufnahmen ins Themenalbum
+  visibleFreeSlot() {
+    for (const p of this.visiblePages()) {
+      if (p == null || p >= this.pageCount) continue;
+      const slot = store.firstFreeSlotOnPage(p);
+      if (slot != null) return slot;
+    }
+    return null;
+  }
+
   visibleSharedPage() {
+    if (this.theme) return null;
     return this.visiblePages().find(p => p != null && store.isShared(p) && store.firstFreeSlotOnPage(p) != null) ?? null;
   }
 
@@ -505,7 +549,7 @@ export class Album {
     if (x < 0 || x > b.width || y < 0 || y > this.grid.headH) return null;
     const right = this.spread && x >= this.pw;
     if (right) x -= this.pw;
-    return { page: right ? this.cur + 1 : this.cur, share: x > this.pw - this.grid.padX - SHARE_R * 2 - 12 };
+    return { page: right ? this.cur + 1 : this.cur, share: !this.theme && x > this.pw - this.grid.padX - SHARE_R * 2 - 12 };
   }
 
   editTitle(page) {

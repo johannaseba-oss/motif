@@ -61,7 +61,8 @@ function screen(cls) {
 
 /* ---------- Profilseite ---------- */
 
-export async function openProfilePage(uid, { onEdit, toast }) {
+export async function openProfilePage(uid, opts) {
+  const { onEdit, toast } = opts;
   const mine = uid === auth.user.id;
   const el = screen('about');
   el.innerHTML = `<div class="about-top"><button class="round" data-a="close" aria-label="Schließen">${icons.close}</button></div><div class="about-body"></div>`;
@@ -116,6 +117,7 @@ export async function openProfilePage(uid, { onEdit, toast }) {
       const vis = VISIBILITY.find(v => v.id === profile?.visibility);
       actions.innerHTML = `
         <button class="pill" data-a="edit">Profil bearbeiten</button>
+        <button class="round" data-a="add" aria-label="Marken ins Profil kleben">${icons.plus}</button>
         <button class="round" data-a="search" aria-label="Profile suchen">${icons.search}</button>`;
       if (vis) {
         const chip = document.createElement('p');
@@ -124,7 +126,11 @@ export async function openProfilePage(uid, { onEdit, toast }) {
         body.querySelector('.about-user').append(' · ', chip);
       }
       actions.querySelector('[data-a=edit]').addEventListener('click', () => onEdit(paint));
-      actions.querySelector('[data-a=search]').addEventListener('click', () => openSearch({ onEdit, toast }));
+      actions.querySelector('[data-a=search]').addEventListener('click', () => openSearch(opts));
+      actions.querySelector('[data-a=add]').addEventListener('click', () => {
+        if (!profile) { toast('Lege zuerst unter „Profil bearbeiten“ deinen @Namen fest.'); return; }
+        openPicker(opts, paint);
+      });
     } else {
       const label = follow === 'accepted' ? 'Folge ich' : follow === 'pending' ? 'Angefragt' : 'Folgen';
       actions.innerHTML = `<button class="pill ${follow ? '' : 'solid'}" data-a="follow">${label}</button>`;
@@ -149,7 +155,7 @@ export async function openProfilePage(uid, { onEdit, toast }) {
         const name = document.createElement('button');
         name.className = 'text-btn person';
         name.textContent = `@${r.username}`;
-        name.addEventListener('click', () => openProfilePage(r.user_id, { onEdit, toast }));
+        name.addEventListener('click', () => openProfilePage(r.user_id, opts));
         const yes = document.createElement('button');
         yes.className = 'text-btn';
         yes.textContent = 'Annehmen';
@@ -186,6 +192,53 @@ export async function openProfilePage(uid, { onEdit, toast }) {
     });
   }
   paint();
+}
+
+/* ---------- Eigene Marken auswählen und ins Profil kleben ---------- */
+
+function openPicker({ ownStamps, ensureSynced, thumbUrl, toast }, onDone) {
+  const el = screen('about picker');
+  el.innerHTML = `
+    <div class="picker-top">
+      <h1>Ins Profil kleben</h1>
+      <button class="pill solid picker-done" data-a="done">Fertig</button>
+    </div>
+    <div class="about-grid picker-grid"></div>`;
+  const grid = el.querySelector('.picker-grid');
+  const done = () => { el.remove(); onDone(); };
+  el.querySelector('[data-a=done]').addEventListener('click', done);
+
+  const stamps = ownStamps();
+  if (!stamps.length) {
+    grid.innerHTML = '<p class="about-empty">Dein Album ist noch leer.</p>';
+    return;
+  }
+  for (const s of stamps) {
+    const cell = document.createElement('button');
+    cell.className = 'about-cell pick';
+    cell.innerHTML = `<img src="${thumbUrl(s)}" alt=""><span class="pick-mark" aria-hidden="true">${icons.check}</span>`;
+    const paint = () => {
+      const on = featured.has(s.id);
+      cell.classList.toggle('on', on);
+      cell.setAttribute('aria-pressed', on);
+      cell.setAttribute('aria-label', (s.name || 'Marke') + (on ? ', im Profil' : ''));
+    };
+    paint();
+    cell.addEventListener('click', async () => {
+      if (cell.disabled) return;
+      cell.disabled = true;
+      try {
+        if (!(await ensureSynced(s))) throw new Error('not synced');
+        await setFeatured(s.id, !featured.has(s.id));
+        tick();
+      } catch {
+        toast('Das hat nicht geklappt. Bist du online?');
+      }
+      cell.disabled = false;
+      paint();
+    });
+    grid.append(cell);
+  }
 }
 
 /* ---------- Große Ansicht einer gezeigten Marke, Wischen durch das Profil ---------- */

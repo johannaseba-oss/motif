@@ -13,6 +13,7 @@ import * as cloud from './cloud.js';
 import * as social from './profile-page.js';
 import { icons } from './icons.js';
 import { tick } from './haptics.js';
+import { THEMES, THEME_FIRST, themeOf } from './themes.js';
 
 const app = document.getElementById('app');
 document.documentElement.style.setProperty('--stamp-clip', clipPathCss);
@@ -22,6 +23,7 @@ let album = null;
 let avatarUrl = null;
 
 const fmtDate = t => new Date(t).toLocaleDateString('de-DE', { day: 'numeric', month: 'long', year: 'numeric' });
+const markenText = n => `${n} ${n === 1 ? 'Marke' : 'Marken'}`;
 const PUBLIC_URL = import.meta.env.DEV ? location.origin + location.pathname : 'https://johannaseba-oss.github.io/motif/';
 const PENDING_JOIN = 'motif.pendingJoin';
 
@@ -144,7 +146,8 @@ async function enterApp() {
     profile = { name: 'Demo', avatar: null, createdAt: Date.now() };
     await store.saveProfile(profile);
   }
-  if (profile) showAlbum();
+  if (shot != null) showAlbum('private');
+  else if (profile) showShelf();
   else profileForm({ first: true });
   if (shot != null) devShot(shot);
 }
@@ -298,7 +301,7 @@ function profileForm({ first, onSaved }) {
     sync.setDisplayName(name).catch(() => {});
     setAvatarUrl();
     close();
-    showAlbum();
+    if (first) showShelf(); else if (album) showAlbum(); else showShelf();
     onSaved?.();
   });
   if (first) setTimeout(() => input.focus(), 50);
@@ -306,13 +309,52 @@ function profileForm({ first, onSaved }) {
 
 /* ---------- Album ---------- */
 
-function showAlbum() {
+/* ---------- Startbildschirm: Wahl zwischen Themenalbum und eigenem Album ---------- */
+
+let albumKind = null;
+
+function showShelf() {
+  albumKind = null;
+  album = null;
   app.querySelector('.home')?.remove();
+  app.querySelector('.shelf')?.remove();
+  const el = document.createElement('div');
+  el.className = 'shelf screen';
+  const privateCount = store.stamps.filter(s => s.slot < THEME_FIRST * store.PER_PAGE).length;
+  const themeCount = store.stamps.filter(s => s.slot >= THEME_FIRST * store.PER_PAGE).length;
+  el.innerHTML = `
+    <header class="top">
+      <h1>MOTIF</h1>
+      <button class="profile-btn" aria-label="Profil von ${escapeHtml(profile.name)}">${avatarHtml()}</button>
+    </header>
+    <div class="covers">
+      <button class="cover" data-kind="theme">
+        <span class="cover-dots">${THEMES.filter(t => t.color).map(t => `<i style="background:${t.color}"></i>`).join('')}</span>
+        <b>Themen</b>
+        <small>${THEMES.length} Seiten · ${markenText(themeCount)}</small>
+      </button>
+      <button class="cover" data-kind="private">
+        <span class="cover-stamp stamp-clip"></span>
+        <b>Mein Album</b>
+        <small>${markenText(privateCount)}</small>
+      </button>
+    </div>`;
+  app.prepend(el);
+  el.querySelectorAll('.cover').forEach(b => b.addEventListener('click', () => showAlbum(b.dataset.kind)));
+  el.querySelector('.profile-btn').addEventListener('click', openOwnProfile);
+  startSharing();
+}
+
+function showAlbum(kind = albumKind || 'private') {
+  albumKind = kind;
+  app.querySelector('.home')?.remove();
+  app.querySelector('.shelf')?.remove();
   const el = document.createElement('div');
   el.className = 'home screen';
   el.innerHTML = `
     <header class="top">
-      <h1>MOTIF</h1>
+      <button class="round back-btn" aria-label="Zur Albumwahl">${icons.back}</button>
+      <h1>${kind === 'theme' ? 'Themen' : 'Mein Album'}</h1>
       <button class="profile-btn" aria-label="Profil von ${escapeHtml(profile.name)}">${avatarHtml()}</button>
     </header>
     <main class="stage"></main>
@@ -321,6 +363,7 @@ function showAlbum() {
     </footer>`;
   app.prepend(el);
   album = new Album(el.querySelector('.stage'), {
+    theme: kind === 'theme',
     onOpen: openDetail,
     onShare: openShareSheet,
     canMove: sync.isMine,
@@ -328,11 +371,23 @@ function showAlbum() {
   });
   album.canEditSharedTitle = info => info.owner === auth.user.id;
   startSharing();
-  el.querySelector('.profile-btn').addEventListener('click', () => social.openProfilePage(auth.user.id, {
+  el.querySelector('.back-btn').addEventListener('click', showShelf);
+  el.querySelector('.profile-btn').addEventListener('click', openOwnProfile);
+  el.querySelector('.shoot').addEventListener('click', showCamera);
+}
+
+function openOwnProfile() {
+  social.openProfilePage(auth.user.id, {
     toast,
     onEdit: refresh => profileForm({ first: false, onSaved: refresh }),
-  }));
-  el.querySelector('.shoot').addEventListener('click', showCamera);
+    // Für die Auswahl im Profil: nur eigene Marken aus dem privaten Album, neueste zuerst
+    ownStamps: () => store.stamps.filter(s => !s.shared).sort((a, b) => b.createdAt - a.createdAt),
+    thumbUrl: s => album?.images.get(s.id)?.src || URL.createObjectURL(s.thumb),
+    ensureSynced: async s => {
+      if (!s.synced) await cloud.syncAll();
+      return !!s.synced;
+    },
+  });
 }
 
 function escapeHtml(s) {
@@ -342,6 +397,11 @@ function escapeHtml(s) {
 /* ---------- Kamera ---------- */
 
 function showCamera() {
+  // Im Themenalbum landet das Foto auf der aufgeschlagenen Seite
+  if (album.theme && album.visibleFreeSlot() == null) {
+    toast('Diese Seite ist voll. Blättere zu einem Thema mit freiem Platz.');
+    return;
+  }
   openCamera({
     onShot: async (cut, { frame, photo, finish }) => {
       // Bei einer offenen gemeinsamen Seite landet das Foto dort, sonst bleibt es privat
@@ -352,7 +412,7 @@ function showCamera() {
           album.preload();
           album.render();
         })
-        : await store.addStamp(cut);
+        : await store.addStamp(cut, album.theme ? album.visibleFreeSlot() : undefined);
       // Der Platz bleibt frei, bis die Marke dort ankommt
       album.hiddenId = stamp.id;
       album.goToSlot(stamp.slot);
@@ -376,11 +436,13 @@ function showCamera() {
 let sharingStarted = false;
 
 async function syncNow() {
-  if (!album || album.drag || album.flip || album.gesture) return;
+  // Auch auf der Albumwahl abgleichen; nur während einer Geste im Album warten
+  const busy = () => !!(album && (album.drag || album.flip || album.gesture));
+  if (busy()) return;
   try {
-    const { changed, removed, avatar } = await cloud.syncAll(() => !!(album.drag || album.flip || album.gesture));
-    removed.forEach(id => album.forget(id));
-    if (changed) { album.clampCur(); album.preload(); album.render(); }
+    const { changed, removed, avatar } = await cloud.syncAll(busy);
+    removed.forEach(id => album?.forget(id));
+    if (changed && album) { album.clampCur(); album.preload(); album.render(); }
     profile = await store.getProfile() || profile;
     if (avatar === 'pulled') {
       setAvatarUrl();
@@ -394,7 +456,7 @@ async function startSharing() {
   if (sharingStarted) return;
   sharingStarted = true;
   sync.handlers.failed = () => toast('Hochladen hat nicht geklappt. Die Marke liegt wieder privat in deinem Album.');
-  sync.handlers.changed = () => { album.preload(); album.render(); };
+  sync.handlers.changed = () => { album?.preload(); album?.render(); };
   let soon = 0;
   const syncSoon = () => { clearTimeout(soon); soon = setTimeout(syncNow, 800); };
   store.setOnChange(syncSoon);
@@ -408,6 +470,7 @@ async function startSharing() {
   localStorage.removeItem(PENDING_JOIN);
   try {
     const page = await sync.joinByToken(token, profile.name);
+    if (!album || album.theme) showAlbum('private');
     album.preload();
     album.goToSlot(page * store.PER_PAGE);
     toast('Du bist jetzt auf dieser gemeinsamen Seite dabei.');
@@ -598,7 +661,7 @@ async function openDetail(first, from) {
     paintFeature();
     el.querySelector('.detail-date').textContent = fmtDate(s.createdAt);
     const list = siblings();
-    const where = s.shared ? `von ${s.shared.ownerName || 'jemandem'}` : `Seite ${pageOf(s) + 1}`;
+    const where = s.shared ? `von ${s.shared.ownerName || 'jemandem'}` : themeOf(pageOf(s))?.title || `Seite ${pageOf(s) + 1}`;
     el.querySelector('.detail-meta').textContent = list.length > 1 ? `${where} · ${list.indexOf(s) + 1} von ${list.length}` : where;
 
     if (fullUrl) { URL.revokeObjectURL(fullUrl); fullUrl = null; }
@@ -614,7 +677,7 @@ async function openDetail(first, from) {
   function paintFeature() {
     const on = social.isFeatured(stamp.id);
     featureBtn.classList.toggle('on', on);
-    featureBtn.textContent = on ? 'Im Profil gezeigt' : 'Im Profil zeigen';
+    featureBtn.textContent = on ? 'Im Profil geklebt' : 'Ins Profil kleben';
   }
   featureBtn.addEventListener('click', async () => {
     if (tooSoon()) return;

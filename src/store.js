@@ -18,6 +18,7 @@ function tx(stores, mode, fn) {
 }
 
 export const PER_PAGE = 16;
+import { THEME_FIRST } from './themes.js';
 export const stamps = []; // {id, slot, createdAt, thumb}
 export const bySlot = new Map();
 
@@ -209,14 +210,15 @@ export function firstFreeSlot() {
   return s;
 }
 export function usedPages() {
+  // Das Themenalbum liegt dahinter und zählt hier nicht mit
   let max = -1;
-  for (const s of stamps) if (s.slot > max) max = s.slot;
+  for (const s of stamps) if (s.slot > max && s.slot < THEME_FIRST * PER_PAGE) max = s.slot;
   const stampPages = max < 0 ? 0 : Math.floor(max / PER_PAGE) + 1;
   return Math.max(stampPages, ...[...Object.keys(pageTitles), ...Object.keys(shared)].map(p => +p + 1));
 }
 
-export async function addStamp({ full, thumb, createdAt = Date.now() }) {
-  const s = { id: crypto.randomUUID(), slot: firstFreeSlot(), createdAt, thumb };
+export async function addStamp({ full, thumb, createdAt = Date.now() }, slot = firstFreeSlot()) {
+  const s = { id: crypto.randomUUID(), slot, createdAt, thumb };
   await tx(['stamps', 'full'], 'readwrite', t => {
     t.objectStore('stamps').put(s);
     t.objectStore('full').put(full, s.id);
